@@ -1,0 +1,6 @@
+{
+  "name": "NutriShake",
+  "description": "Kişisel beslenme hedefleri, fotoğraflı öğün analizi ve malzeme tercihleri ile dinamik günlük shake planlama asistanı",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -3,6 +3,7 @@ import { composeThreeDistinctDailyShakes, composeDeterministicShake } from '../e
 import { validateMasterRecipe, validateAndSanitizeShake } from '../utils/recipeValidator';
 import { MemorySystem } from './memorySystem';
 import { getStoredStock } from '../storage/storageAbstraction';
+import { DAILY_TARGET_KCAL } from '../constants/calorieTargets';
 
 export interface AiPlanRequest {
   date: string;
@@ -27,7 +28,7 @@ export class AiService {
     const memoryContext = MemorySystem.getMemoryPromptContext();
     const stock = getStoredStock();
     const stockKeys = Object.keys(stock).filter((k) => (stock[k]?.normalizedGramsOrMl || 0) > 0);
-    const targetKcal = request.targetKcal || request.userProfile?.calorieGoal || 3623;
+    const targetKcal = Math.max(DAILY_TARGET_KCAL, request.targetKcal || request.userProfile?.calorieGoal || 0);
 
     try {
       const response = await fetch('/api/generate-plan', {
@@ -184,7 +185,7 @@ export class AiService {
     userProfile?: UserProfile | null
   ): Promise<Shake> {
     const candidates = composeThreeDistinctDailyShakes({
-      targetCalories: targetKcal || userProfile?.calorieGoal || 3623,
+      targetCalories: Math.max(DAILY_TARGET_KCAL, targetKcal || userProfile?.calorieGoal || 0),
       timing,
       userProfile,
     });

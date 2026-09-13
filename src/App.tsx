@@ -132,7 +132,11 @@ export default function App() {
 
       const plan = await generateDailyPlanApi({
         date: todayStr,
-        dailyGoalKcal: profile.calorieGoal,
+        // FIX: Previously this sent the user's general diet calorie goal (profile.calorieGoal),
+        // which silently overrode the fixed ~3200 kcal shake target computed by
+        // calculateOptimalDailyShakeKcal(). The server reads exactly this field
+        // (dailyGoalKcal) as the shake calorie target, so it must be optimalShakeKcal.
+        dailyGoalKcal: optimalShakeKcal,
         consumedMealsKcal: nutritionSummary.analyzedMealCalories,
         remainingKcalNeeded: optimalShakeKcal,
         shakeCount: 1, // 1 daily recipe -> 2 equal portions

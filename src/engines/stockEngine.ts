@@ -15,18 +15,35 @@ import {
 } from '../storage/storageAbstraction';
 
 /**
+ * Resolves the ACTUAL key under which an ingredient is stored in the stock object,
+ * checking direct match, canonical ID match, and canonical-alias scan (in that order).
+ * Returns null if the ingredient is not present in stock under any known alias.
+ *
+ * This must be used by every stock read/write path so that lookups behave consistently
+ * with getAvailableStockGrams / validateRecipeStock — otherwise validation can say
+ * "stock is sufficient" while the actual mutation silently no-ops on a key mismatch.
+ */
+export function resolveStockKey(
+  stock: Record<string, any> | undefined | null,
+  ingredientId: string
+): string | null {
+  if (!stock || !ingredientId) return null;
+  if (stock[ingredientId]) return ingredientId;
+  const canonical = canonicalIngredientId(ingredientId);
+  if (stock[canonical]) return canonical;
+  for (const key of Object.keys(stock)) {
+    if (canonicalIngredientId(key) === canonical) return key;
+  }
+  return null;
+}
+
+/**
  * Gets a user's stock item by ingredient ID, checking canonical aliases.
  */
 export function getStockItem(ingredientId: string, customStock?: Record<string, any>): StockItem | null {
   const stock = customStock || getStoredStock();
-  if (!stock) return null;
-  if (stock[ingredientId]) return stock[ingredientId];
-  const canonical = canonicalIngredientId(ingredientId);
-  if (stock[canonical]) return stock[canonical];
-  for (const [key, item] of Object.entries(stock)) {
-    if (canonicalIngredientId(key) === canonical) return item as StockItem;
-  }
-  return null;
+  const key = resolveStockKey(stock, ingredientId);
+  return key ? (stock![key] as StockItem) : null;
 }
 
 /**
@@ -361,10 +378,12 @@ export function consumeStockForShake(
   const today = dateString || new Date().toISOString().split('T')[0];
 
   for (const item of shake.ingredients) {
-    const current = stock[item.ingredientId];
+    const key = resolveStockKey(stock, item.ingredientId);
+    const current = key ? stock[key] : null;
     if (current) {
       const remainingNorm = Math.max(0, current.normalizedGramsOrMl - item.amount);
-      const ing = INGREDIENT_MAP[item.ingredientId];
+      const canonId = canonicalIngredientId(item.ingredientId);
+      const ing = INGREDIENT_MAP[canonId] || INGREDIENT_MAP[item.ingredientId];
       const formatted = formatNormalizedUnit(remainingNorm, ing, current.unit);
 
       current.normalizedGramsOrMl = remainingNorm;
@@ -403,10 +422,12 @@ export function deductRecipeStock(
   const today = new Date().toISOString().split('T')[0];
 
   for (const item of ingredients) {
-    const current = stock[item.ingredientId];
+    const key = resolveStockKey(stock, item.ingredientId);
+    const current = key ? stock[key] : null;
     if (current) {
       const remainingNorm = Math.max(0, current.normalizedGramsOrMl - item.amount);
-      const ing = INGREDIENT_MAP[item.ingredientId];
+      const canonId = canonicalIngredientId(item.ingredientId);
+      const ing = INGREDIENT_MAP[canonId] || INGREDIENT_MAP[item.ingredientId];
       const formatted = formatNormalizedUnit(remainingNorm, ing, current.unit);
 
       current.normalizedGramsOrMl = remainingNorm;
@@ -439,8 +460,10 @@ export function revertStockForShake(shake: Shake): void {
   const today = new Date().toISOString().split('T')[0];
 
   for (const item of shake.ingredients) {
-    const current = stock[item.ingredientId];
-    const ing = INGREDIENT_MAP[item.ingredientId];
+    const key = resolveStockKey(stock, item.ingredientId);
+    const current = key ? stock[key] : null;
+    const canonId = canonicalIngredientId(item.ingredientId);
+    const ing = INGREDIENT_MAP[canonId] || INGREDIENT_MAP[item.ingredientId];
 
     if (current) {
       const restoredNorm = current.normalizedGramsOrMl + item.amount;
@@ -450,8 +473,8 @@ export function revertStockForShake(shake: Shake): void {
       current.updatedAt = new Date().toISOString();
     } else {
       const formatted = formatNormalizedUnit(item.amount, ing);
-      stock[item.ingredientId] = {
-        ingredientId: item.ingredientId,
+      stock[canonId] = {
+        ingredientId: canonId,
         amount: formatted.amount,
         unit: formatted.unit as SupportedUnit,
         normalizedGramsOrMl: item.amount,

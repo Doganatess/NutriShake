@@ -1,6 +1,5 @@
 import { Shake, DailyPlan, UserProfile, ShakeTiming, DailyShake } from '../types';
 import { composeThreeDistinctDailyShakes, composeDeterministicShake } from '../engines/recipeCompositionEngine';
-import { calculateShakeNutrition } from '../engines/nutritionEngine';
 import { validateMasterRecipe, validateAndSanitizeShake } from '../utils/recipeValidator';
 import { MemorySystem } from './memorySystem';
 import { getStoredStock } from '../storage/storageAbstraction';

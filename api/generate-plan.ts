@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { generateDailyShakePlan, generateDeterministicDailyPlan } from '../src/server/geminiService';
+import { DAILY_TARGET_KCAL } from '../src/constants/calorieTargets';
 
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') {
@@ -35,7 +36,10 @@ export default async function handler(req: Request, res: Response) {
 
   const planParams = {
     date: date || new Date().toISOString().split('T')[0],
-    dailyGoalKcal: Number(dailyGoalKcal) || 2000,
+    // FIX: previously defaulted to a hardcoded 2000 kcal and never enforced a floor,
+    // so any low/undefined client value silently became the shake's calorie target.
+    // Now the daily shake target can never fall below DAILY_TARGET_KCAL (3200).
+    dailyGoalKcal: Math.max(DAILY_TARGET_KCAL, Number(dailyGoalKcal) || 0),
     consumedMealsKcal: Number(consumedMealsKcal) || 0,
     remainingKcalNeeded: Number(remainingKcalNeeded) || 800,
     shakeCount: Math.min(2, Math.max(1, Number(shakeCount) || 1)),

@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { replaceSingleShake } from '../src/server/geminiService';
+import { DAILY_TARGET_KCAL } from '../src/constants/calorieTargets';
 
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') {
@@ -31,7 +32,9 @@ export default async function handler(req: Request, res: Response) {
 
   try {
     const newShake = await replaceSingleShake({
-      targetKcal: Number(targetKcal) || 500,
+      // FIX: previously defaulted to 500 kcal (a leftover from an old multi-shake-per-day
+      // model) and never enforced a floor. Now it can never fall below DAILY_TARGET_KCAL.
+      targetKcal: Math.max(DAILY_TARGET_KCAL, Number(targetKcal) || 0),
       currentShakeName: currentShakeName || 'Mevcut Shake',
       portionPreference: portionPreference || 'medium',
       mandatoryIngredientIds: Array.isArray(mandatoryIngredientIds) ? mandatoryIngredientIds : [],

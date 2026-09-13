@@ -38,7 +38,24 @@ export function calculateIngredientNutrition(
 
   const factor = normalizedGrams / 100;
   const fiberPer100g = ing.fiberPer100g || 0;
-  const estimatedPricePer100g = ing.estimatedPrice || 0;
+
+  // Exact cost calculation based on ingredient priceUnit (e.g. TL / kg, TL / L)
+  let cost = 0;
+  if (ing.estimatedPrice && ing.estimatedPrice > 0) {
+    const unitStr = (ing.priceUnit || 'TL / kg').toLowerCase();
+    let pricePerGram = 0;
+    if (unitStr.includes('kg') || unitStr.includes('l') || unitStr.includes('litre')) {
+      pricePerGram = ing.estimatedPrice / 1000;
+    } else if (unitStr.includes('100g') || unitStr.includes('100 ml')) {
+      pricePerGram = ing.estimatedPrice / 100;
+    } else if (unitStr.includes('adet') || unitStr.includes('şişe') || unitStr.includes('tane')) {
+      const servingGrams = ing.edibleWeight || ing.defaultServing || 100;
+      pricePerGram = ing.estimatedPrice / servingGrams;
+    } else {
+      pricePerGram = ing.estimatedPrice / 1000;
+    }
+    cost = Math.round(normalizedGrams * pricePerGram * 10) / 10;
+  }
 
   return {
     normalizedGrams,
@@ -47,7 +64,7 @@ export function calculateIngredientNutrition(
     carbs: Math.round(ing.carbsPer100g * factor * 10) / 10,
     fat: Math.round(ing.fatPer100g * factor * 10) / 10,
     fiber: Math.round(fiberPer100g * factor * 10) / 10,
-    cost: Math.round(estimatedPricePer100g * factor * 10) / 10,
+    cost,
   };
 }
 

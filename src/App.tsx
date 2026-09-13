@@ -28,7 +28,9 @@ import {
 } from './store/storage';
 import { calculateDailyNutrition } from './utils/nutritionEngine';
 import { generateDailyPlanApi } from './services/apiClient';
-import { generateDailyPlan } from './engines/planningEngine';
+import { generateDailyPlan, calculateOptimalDailyShakeKcal } from './engines/planningEngine';
+import { getStoredStock } from './storage/storageAbstraction';
+import { hasDairyInStock } from './engines/recipeCompositionEngine';
 
 import { TodayView } from './views/TodayView';
 import { PlanView } from './views/PlanView';
@@ -96,6 +98,16 @@ export default function App() {
   const handleGeneratePlan = async () => {
     if (!profile) return;
 
+    // Dairy Consistency Check
+    const stock = getStoredStock();
+    if (!hasDairyInStock(stock)) {
+      setGlobalError(
+        'Kıvam ve besin dengesi için kilerinizde en az bir süt ürünü (Tam Yağlı Süt, Yarım Yağlı Süt, Köy Yoğurdu veya Süzme Yoğurt) bulunmalıdır. Lütfen önce Malzemeler / Kiler sekmesine gidip bu ürünlerden en az birini ekleyin.'
+      );
+      setActiveTab('ingredients');
+      return;
+    }
+
     setIsGeneratingPlan(true);
     setGlobalError(null);
 
@@ -108,20 +120,22 @@ export default function App() {
         .filter(([_, state]) => state === 'allowed')
         .map(([id]) => id);
 
-      const forbiddenIds = Object.entries(ingredientStates)
-        .filter(([_, state]) => state === 'forbidden')
-        .map(([id]) => id);
+      const forbiddenIds: string[] = [];
 
       const prefs = getStoredPreferences().map((p) => p.note);
       const disliked = getStoredDislikedShakes().map((d) => d.name);
       const favorites = getStoredFavorites().map((f) => f.name);
 
+      // Optimal daily shake calories calculated by Planning Engine (~800 - 1400 kcal)
+      // Main meal calories are independent and NOT subtracted from the shake target
+      const optimalShakeKcal = calculateOptimalDailyShakeKcal(profile);
+
       const plan = await generateDailyPlanApi({
         date: todayStr,
         dailyGoalKcal: profile.calorieGoal,
         consumedMealsKcal: nutritionSummary.analyzedMealCalories,
-        remainingKcalNeeded: Math.max(300, nutritionSummary.remainingCalories),
-        shakeCount: profile.dailyShakeCount,
+        remainingKcalNeeded: optimalShakeKcal,
+        shakeCount: 1, // 1 daily recipe -> 2 equal portions
         portionPreference: profile.portionPreference,
         mandatoryIngredientIds: mandatoryIds,
         allowedIngredientIds: allowedIds,
@@ -129,6 +143,7 @@ export default function App() {
         userPreferences: prefs,
         dislikedShakeNames: disliked,
         favoriteShakeNames: favorites,
+        userStock: stock,
       });
 
       saveDailyPlan(plan);
@@ -143,7 +158,7 @@ export default function App() {
         setActiveTab('plan');
       } catch (fallbackErr) {
         console.error('Deterministic plan failed:', fallbackErr);
-        const msg = err instanceof Error ? err.message : 'Plan oluşturulamadı.';
+        const msg = fallbackErr instanceof Error ? fallbackErr.message : (err instanceof Error ? err.message : 'Plan oluşturulamadı.');
         setGlobalError(msg);
       }
     } finally {

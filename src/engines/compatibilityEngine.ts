@@ -89,14 +89,6 @@ export function analyzeCompatibility(ingredients: ShakeIngredient[]): Compatibil
     synergies.push('Fındık ve Kakao: Doğal ev yapımı Türk fındık kreması (sağlıklı Nutella) uyumu!');
   }
 
-  // Apple + Cinnamon (Elma + Tarçın)
-  if (
-    (ids.includes('fruit_apple') || ids.includes('dried_apple')) &&
-    ids.includes('other_cinnamon')
-  ) {
-    synergies.push('Elma ve Tarçın: Elmalı turta lezzeti ve kan şekeri dengeleme sinerjisi.');
-  }
-
   // Banana + Oats + Milk (Muz + Yulaf + Süt)
   if (
     ids.includes('fruit_banana') &&

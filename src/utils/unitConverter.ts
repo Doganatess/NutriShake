@@ -40,6 +40,7 @@ export function normalizeToGramsOrMl(
     // Piece fractions
     case 'adet':
     case 'tane':
+      if (amount > 25) return amount; // Already normalized in grams
       return amount * (ingredient?.edibleWeight || 100);
     case '1/2 adet':
     case 'yarım adet':

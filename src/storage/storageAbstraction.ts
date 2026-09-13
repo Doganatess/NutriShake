@@ -43,10 +43,28 @@ export function getTodayDateString(): string {
   return `${year}-${month}-${day}`;
 }
 
+function getStorageItem(key: string): string | null {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return null;
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function setStorageItem(key: string, value: string): void {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(key, value);
+  } catch (e) {
+    console.error('Storage error:', e);
+  }
+}
+
 // User Profile (Starts COMPLETELY EMPTY on fresh install)
 export function getStoredProfile(): UserProfile | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.PROFILE);
+    const raw = getStorageItem(STORAGE_KEYS.PROFILE);
     return raw ? (JSON.parse(raw) as UserProfile) : null;
   } catch (e) {
     console.error('Error loading profile:', e);
@@ -57,7 +75,7 @@ export function getStoredProfile(): UserProfile | null {
 export function saveStoredProfile(profile: UserProfile): void {
   try {
     profile.schemaVersion = CURRENT_SCHEMA_VERSION;
-    localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(profile));
+    setStorageItem(STORAGE_KEYS.PROFILE, JSON.stringify(profile));
   } catch (e) {
     console.error('Error saving profile:', e);
   }
@@ -66,7 +84,7 @@ export function saveStoredProfile(profile: UserProfile): void {
 // User Stock (Database !== Stock, Stock starts completely empty)
 export function getStoredStock(): Record<string, StockItem> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.USER_STOCK);
+    const raw = getStorageItem(STORAGE_KEYS.USER_STOCK);
     return raw ? JSON.parse(raw) : {};
   } catch (e) {
     console.error('Error loading stock:', e);
@@ -76,7 +94,7 @@ export function getStoredStock(): Record<string, StockItem> {
 
 export function saveStoredStock(stock: Record<string, StockItem>): void {
   try {
-    localStorage.setItem(STORAGE_KEYS.USER_STOCK, JSON.stringify(stock));
+    setStorageItem(STORAGE_KEYS.USER_STOCK, JSON.stringify(stock));
   } catch (e) {
     console.error('Error saving stock:', e);
   }
@@ -85,7 +103,7 @@ export function saveStoredStock(stock: Record<string, StockItem>): void {
 // Stock Transactions (Audit trail for in/out inventory)
 export function getStoredStockTransactions(): StockTransaction[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.STOCK_TRANSACTIONS);
+    const raw = getStorageItem(STORAGE_KEYS.STOCK_TRANSACTIONS);
     return raw ? JSON.parse(raw) : [];
   } catch (e) {
     console.error('Error loading stock transactions:', e);
@@ -97,7 +115,7 @@ export function saveStockTransaction(tx: StockTransaction): void {
   try {
     const list = getStoredStockTransactions();
     const updated = [tx, ...list.slice(0, 199)]; // Keep last 200 logs
-    localStorage.setItem(STORAGE_KEYS.STOCK_TRANSACTIONS, JSON.stringify(updated));
+    setStorageItem(STORAGE_KEYS.STOCK_TRANSACTIONS, JSON.stringify(updated));
   } catch (e) {
     console.error('Error saving stock transaction:', e);
   }
@@ -106,8 +124,21 @@ export function saveStockTransaction(tx: StockTransaction): void {
 // Ingredient states: Record<ingredientId, IngredientState> (Clean empty start)
 export function getStoredIngredientStates(): Record<string, IngredientState> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.INGREDIENT_STATES);
-    if (raw) return JSON.parse(raw);
+    const raw = getStorageItem(STORAGE_KEYS.INGREDIENT_STATES);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        const cleaned: Record<string, IngredientState> = {};
+        for (const [id, state] of Object.entries(parsed)) {
+          if (state === 'mandatory') {
+            cleaned[id] = 'mandatory';
+          } else {
+            cleaned[id] = 'allowed';
+          }
+        }
+        return cleaned;
+      }
+    }
   } catch (e) {
     console.error('Error loading ingredient states:', e);
   }
@@ -606,3 +637,52 @@ export function clearUserOnlyData(): void {
 }
 
 export const clearAllAppData = clearUserOnlyData;
+
+/**
+ * Weekly Recommended Signatures tracking (Rule 5: Prevent duplicate shakes in same week)
+ */
+export function getWeeklyKey(dateStr?: string): string {
+  const d = dateStr ? new Date(dateStr) : new Date();
+  const day = d.getDay();
+  // Monday of current week
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(d);
+  monday.setDate(diff);
+  return monday.toISOString().split('T')[0];
+}
+
+export function getWeeklyRecommendedSignatures(weekKey?: string): string[] {
+  try {
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') return [];
+    const key = `nutrishake_weekly_signatures_${weekKey || getWeeklyKey()}`;
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    console.error('Error loading weekly signatures:', e);
+    return [];
+  }
+}
+
+export function saveWeeklyRecommendedSignature(signature: string, weekKey?: string): void {
+  try {
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+    const key = `nutrishake_weekly_signatures_${weekKey || getWeeklyKey()}`;
+    const list = getWeeklyRecommendedSignatures(weekKey);
+    if (!list.includes(signature)) {
+      list.push(signature);
+      localStorage.setItem(key, JSON.stringify(list));
+    }
+  } catch (e) {
+    console.error('Error saving weekly signature:', e);
+  }
+}
+
+export function clearWeeklyRecommendedSignatures(weekKey?: string): void {
+  try {
+    if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+    const key = `nutrishake_weekly_signatures_${weekKey || getWeeklyKey()}`;
+    localStorage.removeItem(key);
+  } catch (e) {
+    console.error('Error clearing weekly signatures:', e);
+  }
+}

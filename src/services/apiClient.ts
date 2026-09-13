@@ -18,6 +18,7 @@ export interface GeneratePlanPayload {
   userPreferences: string[];
   dislikedShakeNames?: string[];
   favoriteShakeNames?: string[];
+  userStock?: Record<string, any>;
 }
 
 export interface ReplaceShakePayload {
@@ -30,6 +31,7 @@ export interface ReplaceShakePayload {
   otherShakesNames?: string[];
   userPreferences: string[];
   dislikedShakeNames?: string[];
+  userStock?: Record<string, any>;
 }
 
 export interface AnalyzeMealPayload {

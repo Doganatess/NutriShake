@@ -27,6 +27,11 @@ import {
 } from '../store/storage';
 import { replaceShakeApi } from '../services/apiClient';
 import { deductRecipeStock, consumeStockForPortion, revertStockForPortion } from '../engines/stockEngine';
+import { composeDeterministicShake, hasDairyInStock } from '../engines/recipeCompositionEngine';
+import { getStoredStock } from '../storage/storageAbstraction';
+import { calculateOptimalDailyShakeKcal } from '../engines/planningEngine';
+import { calculateShakeNutrition } from '../engines/nutritionEngine';
+import { validateShakeRecipe } from '../engines/recipeValidator';
 
 interface PlanViewProps {
   profile: UserProfile;
@@ -266,11 +271,19 @@ export const PlanView: React.FC<PlanViewProps> = ({
     onRefreshData();
   };
 
-  // Replace Single Shake (Preserves all other shakes!)
+  // Replace Single Shake (Preserves all other shakes & synchronizes dailyShake for Today view)
   const handleReplaceSingleShake = async (shake: Shake) => {
     if (!plan) return;
     setReplacingShakeId(shake.id);
     setReplaceError(null);
+
+    // Consistency check: At least one allowed dairy in stock
+    const stock = getStoredStock();
+    if (!hasDairyInStock(stock)) {
+      setReplaceError('Kıvam ve besin dengesi için kilerinizde en az bir süt ürünü (Tam Yağlı Süt, Yarım Yağlı Süt, Köy Yoğurdu veya Süzme Yoğurt) bulunmalıdır.');
+      setReplacingShakeId(null);
+      return;
+    }
 
     try {
       const mandatoryIds = Object.entries(ingredientStates)
@@ -281,39 +294,120 @@ export const PlanView: React.FC<PlanViewProps> = ({
         .filter(([_, state]) => state === 'allowed')
         .map(([id]) => id);
 
-      const forbiddenIds = Object.entries(ingredientStates)
-        .filter(([_, state]) => state === 'forbidden')
-        .map(([id]) => id);
+      const forbiddenIds: string[] = [];
 
       const otherShakes = plan.shakes
         .filter((s) => s.id !== shake.id)
         .map((s) => s.name);
 
-      const newShake = await replaceShakeApi({
-        targetKcal: shake.estimatedCalories || Math.round(nutritionSummary.remainingCalories / profile.dailyShakeCount),
-        currentShakeName: shake.name,
-        portionPreference: profile.portionPreference,
-        mandatoryIngredientIds: mandatoryIds,
-        allowedIngredientIds: allowedIds,
-        forbiddenIngredientIds: forbiddenIds,
-        otherShakesNames: otherShakes,
-        userPreferences,
-        dislikedShakeNames: [shake.name],
-      });
+      const optimalKcal = calculateOptimalDailyShakeKcal(profile);
+      const targetKcal = shake.estimatedCalories && shake.estimatedCalories > 600
+        ? shake.estimatedCalories
+        : optimalKcal;
+
+      let newShake: Shake;
+
+      try {
+        newShake = await replaceShakeApi({
+          targetKcal,
+          currentShakeName: shake.name,
+          portionPreference: profile.portionPreference,
+          mandatoryIngredientIds: mandatoryIds,
+          allowedIngredientIds: allowedIds,
+          forbiddenIngredientIds: forbiddenIds,
+          otherShakesNames: otherShakes,
+          userPreferences,
+          dislikedShakeNames: [shake.name],
+          userStock: stock,
+        });
+      } catch (apiErr) {
+        console.warn('AI replace failed or offline, using deterministic composition engine:', apiErr);
+        // Deterministic fallback: Generate distinct recipe using available stock
+        newShake = composeDeterministicShake({
+          targetCalories: targetKcal,
+          timing: shake.timing || 'morning',
+          stockOnly: true,
+          userProfile: profile,
+          excludedIngredientIds: shake.ingredients.map((i) => i.ingredientId),
+          recentShakes: [shake],
+          excludedShakeNames: [shake.name],
+        });
+      }
+
+      // Re-calculate nutrition and validate
+      const nutrition = calculateShakeNutrition(newShake.ingredients);
+      newShake.estimatedCalories = nutrition.calories;
+      newShake.protein = nutrition.protein;
+      newShake.carbs = nutrition.carbs;
+      newShake.fat = nutrition.fat;
+      newShake.fiber = nutrition.fiber;
+
+      // Enforce 2 equal portions
+      const portionCalories = Math.round(newShake.estimatedCalories / 2);
+      const portionProtein = Math.round((newShake.protein / 2) * 10) / 10;
+      const portionCarbs = Math.round((newShake.carbs / 2) * 10) / 10;
+      const portionFat = Math.round((newShake.fat / 2) * 10) / 10;
+
+      newShake.portionCount = 2;
+      newShake.portionCalories = portionCalories;
+      newShake.portionProtein = portionProtein;
+      newShake.portionCarbs = portionCarbs;
+      newShake.portionFat = portionFat;
+      newShake.portion1Completed = false;
+      newShake.portion2Completed = false;
+      newShake.isCompleted = false;
+
+      // Validate recipe against stock and dairy rules
+      validateShakeRecipe(newShake.ingredients, profile, { checkStock: false });
 
       const updatedShakes = plan.shakes.map((s) => (s.id === shake.id ? newShake : s));
+
+      // Update both plan.shakes and plan.dailyShake so TodayView and PlanView are synchronized
       const updatedPlan: DailyPlan = {
         ...plan,
         shakes: updatedShakes,
+        dailyShake: {
+          id: newShake.id,
+          name: newShake.name,
+          recipeId: newShake.id,
+          recipeName: newShake.name,
+          ingredients: newShake.ingredients,
+          totalNutrition: {
+            calories: newShake.estimatedCalories,
+            protein: newShake.protein,
+            carbs: newShake.carbs,
+            fat: newShake.fat,
+            fiber: newShake.fiber,
+          },
+          portionNutrition: {
+            calories: portionCalories,
+            protein: portionProtein,
+            carbs: portionCarbs,
+            fat: portionFat,
+            fiber: Math.round((newShake.fiber / 2) * 10) / 10,
+          },
+          portionCount: 2,
+          portions: [
+            { portionNumber: 1, name: '1. Öğün', calories: portionCalories, isCompleted: false },
+            { portionNumber: 2, name: '2. Öğün', calories: portionCalories, isCompleted: false },
+          ],
+          portion1Completed: false,
+          portion2Completed: false,
+          isCompleted: false,
+          instructions: newShake.instructions,
+          preparationTimeMinutes: newShake.preparationTimeMinutes,
+          whyChosenReasons: newShake.whyChosenReasons,
+        },
         updatedAt: new Date().toISOString(),
       };
 
       saveDailyPlan(updatedPlan);
       onRefreshData();
     } catch (err: unknown) {
-      console.error(err);
+      console.error('Failed to replace shake:', err);
       const msg = err instanceof Error ? err.message : 'Shake değiştirilemedi.';
       setReplaceError(msg);
+      // Existing shake is strictly preserved
     } finally {
       setReplacingShakeId(null);
     }
@@ -432,7 +526,7 @@ export const PlanView: React.FC<PlanViewProps> = ({
             /* Shake Cards List */
             <div className="space-y-4">
               <div className="flex items-center justify-between text-xs text-stone-600 px-1">
-                <span className="font-semibold">Günün Tarifleri ({plan.shakes.length})</span>
+                <span className="font-semibold">Günün Tarifleri ({plan.shakes.length} Farklı Seçenek)</span>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setActiveTab('builder')}
@@ -452,6 +546,15 @@ export const PlanView: React.FC<PlanViewProps> = ({
                   </button>
                 </div>
               </div>
+
+              {plan.shakes.length < 3 && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-amber-900 text-xs flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span>
+                    Kiler stoğunuzdaki çeşitlilik nedeniyle {plan.shakes.length} geçerli tarif üretildi. Stok dışı uydurma malzeme eklenmemiştir.
+                  </span>
+                </div>
+              )}
 
               {plan.shakes.map((shake, idx) => (
                 <ShakeCard

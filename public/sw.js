@@ -39,7 +39,18 @@ self.addEventListener('activate', (event) => {
 // Fetch Event
 self.addEventListener('fetch', (event) => {
   const { request } = event;
-  const url = new URL(request.url);
+
+  let url;
+  try {
+    url = new URL(request.url);
+  } catch {
+    return; // Ignore invalid / unknown protocols
+  }
+
+  // Only handle HTTP / HTTPS requests
+  if (!url.protocol.startsWith('http')) {
+    return;
+  }
 
   // 1. API calls: Always Network Only (never cache raw API POSTs or sensitive data)
   if (url.pathname.startsWith('/api/')) {
@@ -64,13 +75,18 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request).catch(() => {
-        return caches.match('/index.html') || caches.match('/');
+        return caches.match('/index.html').then((match) => match || caches.match('/'));
       })
     );
     return;
   }
 
-  // 3. Static assets: Stale-While-Revalidate
+  // 3. Non-GET requests should not be cached
+  if (request.method !== 'GET') {
+    return;
+  }
+
+  // 4. Static assets: Stale-While-Revalidate
   event.respondWith(
     caches.match(request).then((cached) => {
       const fetchPromise = fetch(request)

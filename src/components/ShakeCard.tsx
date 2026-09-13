@@ -107,10 +107,16 @@ export const ShakeCard: React.FC<ShakeCardProps> = ({
     }
 
     const recalculated = calculateShakeNutrition(editIngredients);
+    const portionCalories = Math.round(recalculated.calories / 2);
     const updatedShake: Shake = {
       ...shake,
       ingredients: recalculated.ingredients,
       estimatedCalories: recalculated.calories,
+      portionCalories,
+      portionProtein: Math.round((recalculated.protein / 2) * 10) / 10,
+      portionCarbs: Math.round((recalculated.carbs / 2) * 10) / 10,
+      portionFat: Math.round((recalculated.fat / 2) * 10) / 10,
+      portionFiber: Math.round((recalculated.fiber / 2) * 10) / 10,
       protein: recalculated.protein,
       carbs: recalculated.carbs,
       fat: recalculated.fat,
@@ -313,10 +319,30 @@ export const ShakeCard: React.FC<ShakeCardProps> = ({
         <div className="mt-2.5 flex items-center justify-between text-[11px] text-stone-500 px-1">
           <div className="flex items-center gap-1 font-medium text-emerald-800 bg-emerald-50/70 px-2 py-0.5 rounded-lg border border-emerald-100">
             <Coins className="w-3 h-3 text-emerald-600" />
-            <span>Tahmini Maliyet: ~{currentNutrition.estimatedCost || 35} TL</span>
+            <span>
+              {currentNutrition.estimatedCost && currentNutrition.estimatedCost > 0
+                ? `Tahmini Maliyet: ~${currentNutrition.estimatedCost} TL`
+                : 'Maliyet: Fiyat bilgisi girilmedi'}
+            </span>
           </div>
           <div className="text-stone-400">
             Kıvam: <span className="font-semibold text-stone-700">{currentNutrition.totalVolumeMl && currentNutrition.totalVolumeMl > 550 ? 'Büyük boy, akışkan' : 'İçimi dengeli kıvam'}</span>
+          </div>
+        </div>
+
+        {/* Equal 2-Portion Breakdown Banner (Real-time recalculation) */}
+        <div className="mt-2.5 p-2 rounded-xl bg-stone-100/90 border border-stone-200 flex flex-wrap items-center justify-between gap-1.5 text-xs">
+          <div className="flex items-center gap-1.5 font-bold text-stone-900">
+            <span className="text-emerald-800">🥤 Günlük Shake:</span>
+            <span>{currentNutrition.calories} kcal</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px]">
+            <span className="bg-white px-2 py-0.5 rounded-md border border-stone-200 text-emerald-800 font-semibold shadow-2xs">
+              1. Porsiyon: {Math.round(currentNutrition.calories / 2)} kcal (%50)
+            </span>
+            <span className="bg-white px-2 py-0.5 rounded-md border border-stone-200 text-emerald-800 font-semibold shadow-2xs">
+              2. Porsiyon: {Math.round(currentNutrition.calories / 2)} kcal (%50)
+            </span>
           </div>
         </div>
 
@@ -664,7 +690,11 @@ export const ShakeCard: React.FC<ShakeCardProps> = ({
               }`}
             >
               <CheckCircle2 className={`w-3.5 h-3.5 ${shake.portion1Completed ? 'text-white' : 'text-stone-400'}`} />
-              <span>{shake.portion1Completed ? '1. Öğün: İçildi ✓' : '1. Öğün: İçilmedi'}</span>
+              <span>
+                {shake.portion1Completed
+                  ? `1. Porsiyon (${Math.round(currentNutrition.calories / 2)} kcal): İçildi ✓`
+                  : `1. Porsiyon: İçilmedi (${Math.round(currentNutrition.calories / 2)} kcal)`}
+              </span>
             </button>
 
             <button
@@ -676,7 +706,11 @@ export const ShakeCard: React.FC<ShakeCardProps> = ({
               }`}
             >
               <CheckCircle2 className={`w-3.5 h-3.5 ${shake.portion2Completed ? 'text-white' : 'text-stone-400'}`} />
-              <span>{shake.portion2Completed ? '2. Öğün: İçildi ✓' : '2. Öğün: İçilmedi'}</span>
+              <span>
+                {shake.portion2Completed
+                  ? `2. Porsiyon (${Math.round(currentNutrition.calories / 2)} kcal): İçildi ✓`
+                  : `2. Porsiyon: İçilmedi (${Math.round(currentNutrition.calories / 2)} kcal)`}
+              </span>
             </button>
           </div>
         ) : (

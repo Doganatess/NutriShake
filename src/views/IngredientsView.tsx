@@ -3,7 +3,6 @@ import {
   Search,
   Filter,
   Check,
-  Ban,
   Sparkles,
   Info,
   X,
@@ -39,26 +38,24 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedSweetenerSubCategory, setSelectedSweetenerSubCategory] = useState<'all' | 'jams' | 'honeys' | 'molasses'>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'mandatory' | 'allowed' | 'forbidden' | 'regional'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'mandatory' | 'allowed' | 'regional'>('all');
   const [quickAddedId, setQuickAddedId] = useState<string | null>(null);
 
   // Count summaries
   const counts = useMemo(() => {
     let mandatory = 0;
     let allowed = 0;
-    let forbidden = 0;
     let regional = 0;
 
     INGREDIENTS_DATABASE.forEach((item) => {
       const state = ingredientStates[item.id] || 'allowed';
       if (state === 'mandatory') mandatory++;
-      else if (state === 'forbidden') forbidden++;
       else allowed++;
 
       if (item.isRegional) regional++;
     });
 
-    return { mandatory, allowed, forbidden, regional };
+    return { mandatory, allowed, regional };
   }, [ingredientStates]);
 
   // Filtered ingredients
@@ -76,8 +73,6 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
 
     if (statusFilter === 'mandatory') {
       list = list.filter((item) => ingredientStates[item.id] === 'mandatory');
-    } else if (statusFilter === 'forbidden') {
-      list = list.filter((item) => ingredientStates[item.id] === 'forbidden');
     } else if (statusFilter === 'allowed') {
       list = list.filter((item) => !ingredientStates[item.id] || ingredientStates[item.id] === 'allowed');
     } else if (statusFilter === 'regional') {
@@ -168,11 +163,11 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
               Malzeme Tercihleri ve Kuralları
             </h2>
             <p className="text-xs text-stone-300 mt-1 leading-relaxed">
-              Zorunlu kıldığınız malzemeler tariflerde önceliklendirilir, yasakladıklarınız asla shake'e eklenmez. İstediğiniz malzemeyi tek tıkla kilerinize ekleyebilirsiniz.
+              Zorunlu kıldığınız malzemeler tariflerde önceliklendirilir. Kilerinizde bulunan malzemelerle dengeli tarifler hazırlanır. İstediğiniz malzemeyi tek tıkla kilerinize ekleyebilirsiniz.
             </p>
 
             {/* Status Filter Badges */}
-            <div className="grid grid-cols-4 gap-2 mt-4 pt-3 border-t border-stone-800 text-center">
+            <div className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-stone-800 text-center">
               <button
                 onClick={() => setStatusFilter(statusFilter === 'mandatory' ? 'all' : 'mandatory')}
                 className={`rounded-2xl p-2 transition text-left sm:text-center ${
@@ -197,19 +192,6 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                 <div className="text-[10px] text-stone-300 uppercase font-semibold">Serbest</div>
                 <div className="text-base sm:text-lg font-bold text-white mt-0.5">{counts.allowed}</div>
                 <div className="text-[9px] text-stone-400 truncate">Gerekirse seç</div>
-              </button>
-
-              <button
-                onClick={() => setStatusFilter(statusFilter === 'forbidden' ? 'all' : 'forbidden')}
-                className={`rounded-2xl p-2 transition text-left sm:text-center ${
-                  statusFilter === 'forbidden'
-                    ? 'bg-rose-800 border-2 border-rose-400'
-                    : 'bg-rose-950/70 border border-rose-800/80 hover:bg-rose-900/60'
-                }`}
-              >
-                <div className="text-[10px] text-rose-400 uppercase font-semibold">Kullanma</div>
-                <div className="text-base sm:text-lg font-bold text-rose-300 mt-0.5">{counts.forbidden}</div>
-                <div className="text-[9px] text-rose-400/80 truncate">Asla ekleme</div>
               </button>
 
               <button
@@ -339,8 +321,6 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                   className={`p-3.5 sm:p-4 rounded-3xl border transition bg-white shadow-2xs ${
                     currentState === 'mandatory'
                       ? 'border-emerald-400 ring-1 ring-emerald-400/30'
-                      : currentState === 'forbidden'
-                      ? 'border-rose-300 bg-rose-50/20'
                       : 'border-stone-200 hover:border-stone-300'
                   }`}
                 >
@@ -430,18 +410,6 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                           }`}
                         >
                           Serbest
-                        </button>
-
-                        <button
-                          onClick={() => handleSetState(ing.id, 'forbidden')}
-                          className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center gap-1 ${
-                            currentState === 'forbidden'
-                              ? 'bg-rose-600 text-white shadow-xs'
-                              : 'text-stone-600 hover:text-rose-700'
-                          }`}
-                        >
-                          <Ban className="w-3 h-3" />
-                          Kullanma
                         </button>
                       </div>
                     </div>

@@ -1,5 +1,5 @@
 import { DailyPlan, Shake, UserProfile, MealAnalysis, DailyShake } from '../types';
-import { composeDeterministicShake } from './recipeCompositionEngine';
+import { composeThreeDistinctDailyShakes, composeDeterministicShake } from './recipeCompositionEngine';
 import { getStoredProfile, saveDailyPlan } from '../storage/storageAbstraction';
 
 export interface PlanOptions {
@@ -8,12 +8,30 @@ export interface PlanOptions {
 }
 
 /**
- * Deterministic Planning Engine (1 Shake / Day -> 2 Equal Portions).
+ * Calculates optimal daily shake calories.
+ * Strictly adheres to Rule 1:
+ * abs(shakeTotalKcal - dailyTargetKcal) <= 300 kcal.
+ *
+ * Example:
+ * Total Daily Goal: 3623 kcal
+ * Daily Shake Total Target: 3623 kcal (Acceptable range: 3323 - 3923 kcal)
+ *   Portion 1 (50%): ~1800 kcal
+ *   Portion 2 (50%): ~1800 kcal
+ *
+ * Main meal calories are tracked independently and are NOT subtracted from the shake target.
+ */
+export function calculateOptimalDailyShakeKcal(userProfile?: UserProfile | null): number {
+  if (!userProfile) return 3623;
+  return userProfile.calorieGoal || 3623;
+}
+
+/**
+ * Deterministic Planning Engine (1 Active Shake / Day -> 2 Equal Portions, with at least 3 candidates).
  *
  * Requirements:
- * 1. Exactly 1 shake recipe generated per day.
- * 2. Divided into 2 equal portions: 1. Öğün (50%) and 2. Öğün (50%).
- * 3. Tied to a single daily recipe ID / shake ID.
+ * 1. Produces at least 3 distinct candidates satisfying all 12 rules.
+ * 2. Selected master recipe is divided into 2 equal portions: 1. Öğün (50%) and 2. Öğün (50%).
+ * 3. Ties candidateShakes and selectedShakeId to the plan.
  * 4. Main meal calories are tracked separately and DO NOT shrink the shake plan.
  */
 export function generateDailyPlan(
@@ -23,30 +41,29 @@ export function generateDailyPlan(
 ): DailyPlan {
   const userProfile = profile !== undefined ? profile : getStoredProfile();
   
-  // Planned shake target: ~1000-1280 kcal total (~500-640 kcal per portion)
-  // Aligns with the planned caloric surplus for gaining +5 KG / month
-  const surplusTarget = userProfile?.dailySurplusKcal || 1250;
-  const targetShakesKcal = Math.min(1400, Math.max(800, surplusTarget));
+  // Planned shake target matches dailyTargetKcal: 3623 kcal (+-300 kcal)
+  const targetShakesKcal = calculateOptimalDailyShakeKcal(userProfile);
 
-  // Compose exactly ONE master shake recipe for the day
-  const singleShake = composeDeterministicShake({
+  // Compose at least 3 distinct candidates
+  const candidates = composeThreeDistinctDailyShakes({
     targetCalories: targetShakesKcal,
     timing: 'morning',
     userProfile,
   });
 
-  const portionKcal = singleShake.portionCalories || Math.round(singleShake.estimatedCalories / 2);
+  const selectedShake = candidates[0];
+  const portionKcal = selectedShake.portionCalories || Math.round(selectedShake.estimatedCalories / 2);
 
   const dailyShake: DailyShake = {
-    id: singleShake.id,
-    name: singleShake.name,
-    ingredients: singleShake.ingredients,
+    id: selectedShake.id,
+    name: selectedShake.name,
+    ingredients: selectedShake.ingredients,
     totalNutrition: {
-      calories: singleShake.estimatedCalories,
-      protein: singleShake.protein,
-      carbs: singleShake.carbs,
-      fat: singleShake.fat,
-      fiber: singleShake.fiber,
+      calories: selectedShake.estimatedCalories,
+      protein: selectedShake.protein,
+      carbs: selectedShake.carbs,
+      fat: selectedShake.fat,
+      fiber: selectedShake.fiber,
     },
     portionCount: 2,
     portions: [
@@ -54,25 +71,30 @@ export function generateDailyPlan(
         portionNumber: 1,
         name: '1. Öğün',
         calories: portionKcal,
-        isCompleted: singleShake.portion1Completed || false,
+        isCompleted: selectedShake.portion1Completed || false,
       },
       {
         portionNumber: 2,
         name: '2. Öğün',
         calories: portionKcal,
-        isCompleted: singleShake.portion2Completed || false,
+        isCompleted: selectedShake.portion2Completed || false,
       },
     ],
-    instructions: singleShake.instructions,
-    preparationTimeMinutes: singleShake.preparationTimeMinutes,
-    whyChosenReasons: singleShake.whyChosenReasons,
+    instructions: selectedShake.instructions,
+    preparationTimeMinutes: selectedShake.preparationTimeMinutes,
+    whyChosenReasons: selectedShake.whyChosenReasons,
   };
 
   const plan: DailyPlan = {
+    id: `plan_${targetDate}_${Date.now()}`,
     date: targetDate,
-    shakes: [singleShake],
+    title: 'Günün Doğal Shake Planı',
+    notes: `${candidates.length} farklı geçerli alternatif tarif hazırlandı (her biri 2 eşit porsiyon).`,
+    shakes: candidates,
     dailyShake,
-    totalCalories: singleShake.estimatedCalories,
+    candidateShakes: candidates,
+    selectedShakeId: selectedShake.id,
+    totalCalories: selectedShake.estimatedCalories,
     completedCalories: 0,
     isFullyCompleted: false,
     schemaVersion: 2,

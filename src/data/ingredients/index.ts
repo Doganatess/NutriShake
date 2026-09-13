@@ -68,7 +68,7 @@ const ALIAS_MAP: Record<string, string> = {
   almond: 'nut_almond',
   fig_dried: 'dried_fig',
   water_natural: 'other_water',
-  cinnamon_ground: 'other_cinnamon',
+  mineral_water: 'other_mineral_water',
   grape_molasses: 'molasses_grape',
   mulberry_molasses: 'molasses_mulberry',
   carob_molasses: 'molasses_carob',
@@ -78,6 +78,19 @@ for (const [alias, realId] of Object.entries(ALIAS_MAP)) {
   if (INGREDIENT_MAP[realId]) {
     INGREDIENT_MAP[alias] = INGREDIENT_MAP[realId];
   }
+}
+
+/**
+ * Maps any ingredient ID or alias to its primary canonical database ID
+ */
+export function canonicalIngredientId(idOrName: string): string {
+  if (!idOrName) return '';
+  const trimmed = idOrName.trim();
+  if (ALIAS_MAP[trimmed]) return ALIAS_MAP[trimmed];
+  if (INGREDIENT_MAP[trimmed]) return INGREDIENT_MAP[trimmed].id;
+  const found = findIngredient(trimmed);
+  if (found) return found.id;
+  return trimmed;
 }
 
 /**

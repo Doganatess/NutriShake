@@ -15,7 +15,7 @@ export type ShakeTiming =
   | 'breakfast'
   | 'lunch'
   | 'pre_workout';
-export type IngredientState = 'allowed' | 'mandatory' | 'forbidden';
+export type IngredientState = 'allowed' | 'mandatory';
 
 // Strict 8 categories requested by master architecture
 export type IngredientCategory =
@@ -268,6 +268,8 @@ export interface DailyPlan {
   completedCalories?: number;
   isFullyCompleted?: boolean;
   schemaVersion?: number;
+  candidateShakes?: Shake[]; // Rule 4: At least 3 distinct shake candidates
+  selectedShakeId?: string; // Currently active shake among candidates
   dailyShake?: DailyShake;
   shakes: Shake[];
   createdAt?: string;

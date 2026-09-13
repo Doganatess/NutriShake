@@ -1,7 +1,7 @@
-import { Shake, DailyPlan, UserProfile, ShakeTiming } from '../types';
-import { composeDeterministicShake } from '../engines/recipeCompositionEngine';
+import { Shake, DailyPlan, UserProfile, ShakeTiming, DailyShake } from '../types';
+import { composeThreeDistinctDailyShakes, composeDeterministicShake } from '../engines/recipeCompositionEngine';
 import { calculateShakeNutrition } from '../engines/nutritionEngine';
-import { validateShakeRecipe } from '../engines/recipeValidator';
+import { validateMasterRecipe, validateAndSanitizeShake } from '../utils/recipeValidator';
 import { MemorySystem } from './memorySystem';
 import { getStoredStock } from '../storage/storageAbstraction';
 
@@ -16,18 +16,19 @@ export interface AiPlanRequest {
  * Two-Layer AI Architecture:
  * Layer 1 (AI Suggestion): Creates creative Turkish names, timing concepts, and culinary ideas.
  * Layer 2 (Deterministic Validation & Nutrition): Overwrites ALL macros, kcal, and quantities
- * with pure mathematical calculations from nutritionEngine & recipeValidator.
+ * with pure mathematical calculations from nutritionEngine & recipeValidator, checking all 12 rules.
  */
 export class AiService {
   /**
    * Generates a daily shake plan.
    * If server API is accessible, attempts LLM suggestions;
-   * Otherwise falls back gracefully to the deterministic engine.
+   * Otherwise falls back gracefully to the deterministic engine producing at least 3 candidates.
    */
   static async generateDailyPlan(request: AiPlanRequest): Promise<DailyPlan> {
     const memoryContext = MemorySystem.getMemoryPromptContext();
     const stock = getStoredStock();
     const stockKeys = Object.keys(stock).filter((k) => (stock[k]?.normalizedGramsOrMl || 0) > 0);
+    const targetKcal = request.targetKcal || request.userProfile?.calorieGoal || 3623;
 
     try {
       const response = await fetch('/api/generate-plan', {
@@ -35,7 +36,7 @@ export class AiService {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           date: request.date,
-          dailyGoalKcal: request.targetKcal,
+          dailyGoalKcal: targetKcal,
           shakeCount: request.shakeCount || 3,
           availableStockKeys: stockKeys,
           memoryContext,
@@ -45,52 +46,70 @@ export class AiService {
 
       if (response.ok) {
         const rawData = await response.json();
-        if (rawData.shakes && Array.isArray(rawData.shakes)) {
-          // LAYER 2: Deterministic Overwrite & Sanitization (1 shake per day -> 2 equal portions)
-          const firstShakeRaw = rawData.shakes[0];
-          if (firstShakeRaw) {
-            const rawIngredients = firstShakeRaw.ingredients || [];
-            const nutrition = calculateShakeNutrition(rawIngredients);
-            const totalKcal = nutrition.calories;
-            const portionKcal = Math.round(totalKcal / 2);
+        const rawShakes = rawData.candidateShakes || rawData.shakes || [];
+        if (Array.isArray(rawShakes) && rawShakes.length > 0) {
+          const validCandidates: Shake[] = [];
 
-            const verifiedShake: Shake = {
-              id: firstShakeRaw.id || `shake_${Date.now()}_0`,
-              name: firstShakeRaw.name || 'Günün Dengeli Doğal Shake’i',
-              description: firstShakeRaw.description || `Günün 2 eşit porsiyona ayrılmış tek shake tarifi (Porsiyon başı ${portionKcal} kcal).`,
-              timing: 'morning',
-              ingredients: nutrition.ingredients,
-              estimatedCalories: totalKcal,
-              protein: nutrition.protein,
-              carbs: nutrition.carbs,
-              fat: nutrition.fat,
-              fiber: nutrition.fiber,
-              estimatedCost: nutrition.estimatedCost,
-              totalVolumeMl: nutrition.totalVolumeMl,
-              instructions: firstShakeRaw.instructions || [
-                'Tüm malzemeleri tek seferde blendere ekleyin.',
-                'Yüksek devirde 50-60 saniye pürüzsüz kıvama gelene kadar çekin.',
-                `Karışımı 2 EŞİT PORSIYONA (${portionKcal} kcal / porsiyon) bölün.`,
-                '1. porsiyonu vardiya başında, 2. porsiyonu vardiya sonrası tüketin.',
-              ],
-              preparationTimeMinutes: 4,
+          for (const raw of rawShakes) {
+            const sanitized = validateAndSanitizeShake(raw, {
+              targetKcal,
+              userStock: stock,
+            });
+
+            if (sanitized.sanitizedShake) {
+              const masterCheck = validateMasterRecipe(sanitized.sanitizedShake, {
+                targetKcal,
+                userStock: stock,
+              });
+
+              if (masterCheck.isValid) {
+                validCandidates.push(sanitized.sanitizedShake);
+              }
+            }
+          }
+
+          if (validCandidates.length > 0) {
+            const selectedShake = validCandidates[0];
+            const portionKcal = selectedShake.portionCalories || Math.round(selectedShake.estimatedCalories / 2);
+
+            const dailyShake: DailyShake = {
+              id: selectedShake.id,
+              name: selectedShake.name,
+              ingredients: selectedShake.ingredients,
+              totalNutrition: {
+                calories: selectedShake.estimatedCalories,
+                protein: selectedShake.protein,
+                carbs: selectedShake.carbs,
+                fat: selectedShake.fat,
+                fiber: selectedShake.fiber,
+              },
               portionCount: 2,
-              portionCalories: portionKcal,
-              portionProtein: Math.round((nutrition.protein / 2) * 10) / 10,
-              portionCarbs: Math.round((nutrition.carbs / 2) * 10) / 10,
-              portionFat: Math.round((nutrition.fat / 2) * 10) / 10,
-              portionFiber: Math.round((nutrition.fiber / 2) * 10) / 10,
-              portion1Completed: false,
-              portion2Completed: false,
-              isCompleted: false,
-              schemaVersion: 2,
-              createdAt: new Date().toISOString(),
+              portions: [
+                {
+                  portionNumber: 1,
+                  name: '1. Öğün',
+                  calories: portionKcal,
+                  isCompleted: selectedShake.portion1Completed || false,
+                },
+                {
+                  portionNumber: 2,
+                  name: '2. Öğün',
+                  calories: portionKcal,
+                  isCompleted: selectedShake.portion2Completed || false,
+                },
+              ],
+              instructions: selectedShake.instructions,
+              preparationTimeMinutes: selectedShake.preparationTimeMinutes,
+              whyChosenReasons: selectedShake.whyChosenReasons,
             };
 
             return {
               date: request.date,
-              shakes: [verifiedShake],
-              totalCalories: totalKcal,
+              shakes: [selectedShake],
+              dailyShake,
+              candidateShakes: validCandidates,
+              selectedShakeId: selectedShake.id,
+              totalCalories: selectedShake.estimatedCalories,
               completedCalories: 0,
               isFullyCompleted: false,
               schemaVersion: 2,
@@ -102,18 +121,55 @@ export class AiService {
       console.warn('AI API call failed or offline, falling back to Deterministic Engine:', e);
     }
 
-    // Deterministic Fallback: Exactly 1 single shake / day -> 2 equal portions
-    const singleShake = composeDeterministicShake({
-      targetCalories: request.targetKcal || 1000,
+    // Deterministic Fallback: Generates 3 distinct candidates, all strictly adhering to the 12 rules
+    const candidates = composeThreeDistinctDailyShakes({
+      targetCalories: targetKcal,
       timing: 'morning',
       userProfile: request.userProfile,
       stockOnly: stockKeys.length > 0,
     });
 
+    const selectedShake = candidates[0];
+    const portionKcal = selectedShake.portionCalories || Math.round(selectedShake.estimatedCalories / 2);
+
+    const dailyShake: DailyShake = {
+      id: selectedShake.id,
+      name: selectedShake.name,
+      ingredients: selectedShake.ingredients,
+      totalNutrition: {
+        calories: selectedShake.estimatedCalories,
+        protein: selectedShake.protein,
+        carbs: selectedShake.carbs,
+        fat: selectedShake.fat,
+        fiber: selectedShake.fiber,
+      },
+      portionCount: 2,
+      portions: [
+        {
+          portionNumber: 1,
+          name: '1. Öğün',
+          calories: portionKcal,
+          isCompleted: selectedShake.portion1Completed || false,
+        },
+        {
+          portionNumber: 2,
+          name: '2. Öğün',
+          calories: portionKcal,
+          isCompleted: selectedShake.portion2Completed || false,
+        },
+      ],
+      instructions: selectedShake.instructions,
+      preparationTimeMinutes: selectedShake.preparationTimeMinutes,
+      whyChosenReasons: selectedShake.whyChosenReasons,
+    };
+
     return {
       date: request.date,
-      shakes: [singleShake],
-      totalCalories: singleShake.estimatedCalories,
+      shakes: [selectedShake],
+      dailyShake,
+      candidateShakes: candidates,
+      selectedShakeId: selectedShake.id,
+      totalCalories: selectedShake.estimatedCalories,
       completedCalories: 0,
       isFullyCompleted: false,
       schemaVersion: 2,
@@ -121,17 +177,18 @@ export class AiService {
   }
 
   /**
-   * Replaces or swaps a single shake with a fresh alternative.
+   * Replaces or swaps a single shake with a fresh alternative satisfying all rules.
    */
   static async replaceSingleShake(
     targetKcal: number,
     timing: ShakeTiming,
     userProfile?: UserProfile | null
   ): Promise<Shake> {
-    return composeDeterministicShake({
-      targetCalories: targetKcal,
+    const candidates = composeThreeDistinctDailyShakes({
+      targetCalories: targetKcal || userProfile?.calorieGoal || 3623,
       timing,
       userProfile,
     });
+    return candidates[1] || candidates[0];
   }
 }

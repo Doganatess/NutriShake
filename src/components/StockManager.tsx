@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Package,
   Plus,
@@ -14,7 +14,12 @@ import {
   ArrowUpRight,
 } from 'lucide-react';
 import { StockItem, SupportedUnit, StockTransaction } from '../types';
-import { INGREDIENT_MAP, INGREDIENTS_DATABASE, searchIngredients } from '../data/ingredients';
+import {
+  INGREDIENT_MAP,
+  INGREDIENTS_DATABASE,
+  searchIngredients,
+  canonicalIngredientId,
+} from '../data/ingredients';
 import {
   getStoredStock,
   saveStoredStock,
@@ -49,18 +54,32 @@ export const StockManager: React.FC<StockManagerProps> = ({ onStockChange }) => 
     if (onStockChange) onStockChange();
   };
 
+  useEffect(() => {
+    const handleStockUpdate = () => {
+      refreshStock();
+    };
+    window.addEventListener('nutrishake-stock-changed', handleStockUpdate);
+    window.addEventListener('storage', handleStockUpdate);
+    return () => {
+      window.removeEventListener('nutrishake-stock-changed', handleStockUpdate);
+      window.removeEventListener('storage', handleStockUpdate);
+    };
+  }, []);
+
   const stockList = useMemo(() => {
-    return (Object.values(stock) as StockItem[]).map((item) => {
-      const ing = INGREDIENT_MAP[item.ingredientId];
-      const formatted = formatNormalizedUnit(item.normalizedGramsOrMl, ing, item.unit);
-      return {
-        ...item,
-        ing,
-        displayAmount: formatted.amount,
-        displayUnit: formatted.unit,
-        displayString: formatted.display,
-      };
-    });
+    return (Object.values(stock) as StockItem[])
+      .filter((item) => item && (item.amount > 0 || (item.normalizedGramsOrMl && item.normalizedGramsOrMl > 0)))
+      .map((item) => {
+        const ing = INGREDIENT_MAP[item.ingredientId] || INGREDIENT_MAP[canonicalIngredientId(item.ingredientId)];
+        const formatted = formatNormalizedUnit(item.normalizedGramsOrMl, ing, item.unit);
+        return {
+          ...item,
+          ing,
+          displayAmount: formatted.amount,
+          displayUnit: formatted.unit,
+          displayString: formatted.display,
+        };
+      });
   }, [stock]);
 
   // Filtered ingredients for search in modal
@@ -111,26 +130,48 @@ export const StockManager: React.FC<StockManagerProps> = ({ onStockChange }) => 
     setAddNote('');
   };
 
-  const handleQuickAdjust = (ingredientId: string, delta: number) => {
+  const handleQuickAdjust = (ingredientId: string, delta: number, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
     const current = stock[ingredientId];
     if (!current) return;
 
-    const ing = INGREDIENT_MAP[ingredientId];
     const newAmount = Math.max(0, current.amount + delta);
 
     if (newAmount === 0) {
-      removeStockItem(ingredientId);
+      handleDelete(ingredientId, e);
     } else {
       setExactStock(ingredientId, newAmount, current.unit);
-    }
-    refreshStock();
-  };
-
-  const handleDelete = (ingredientId: string) => {
-    if (confirm('Bu malzemeyi kilerinizden kaldırmak istediğinize emin misiniz?')) {
-      removeStockItem(ingredientId);
       refreshStock();
     }
+  };
+
+  const handleDelete = (ingredientId: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+
+    // 1. Remove from persistence (storage)
+    removeStockItem(ingredientId);
+
+    // 2. Immediately update local state so UI updates instantly
+    setStock((prev) => {
+      const next = { ...prev };
+      delete next[ingredientId];
+      const canon = canonicalIngredientId(ingredientId);
+      delete next[canon];
+      for (const k of Object.keys(next)) {
+        if (k === ingredientId || k === canon || canonicalIngredientId(k) === canon) {
+          delete next[k];
+        }
+      }
+      return next;
+    });
+
+    if (onStockChange) onStockChange();
   };
 
   return (
@@ -224,27 +265,33 @@ export const StockManager: React.FC<StockManagerProps> = ({ onStockChange }) => 
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center gap-1.5 shrink-0">
+              <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
                 <button
-                  onClick={() => handleQuickAdjust(item.ingredientId, -1)}
-                  className="w-8 h-8 rounded-xl bg-stone-100 text-stone-700 font-bold hover:bg-stone-200 flex items-center justify-center text-sm transition"
+                  type="button"
+                  onClick={(e) => handleQuickAdjust(item.ingredientId, -1, e)}
+                  className="w-8 h-8 rounded-xl bg-stone-100 text-stone-700 font-bold hover:bg-stone-200 flex items-center justify-center text-sm transition cursor-pointer"
                   title="Azalt"
+                  id={`stock-decrease-${item.ingredientId}`}
                 >
                   -
                 </button>
                 <button
-                  onClick={() => handleQuickAdjust(item.ingredientId, 1)}
-                  className="w-8 h-8 rounded-xl bg-stone-100 text-stone-700 font-bold hover:bg-stone-200 flex items-center justify-center text-sm transition"
+                  type="button"
+                  onClick={(e) => handleQuickAdjust(item.ingredientId, 1, e)}
+                  className="w-8 h-8 rounded-xl bg-stone-100 text-stone-700 font-bold hover:bg-stone-200 flex items-center justify-center text-sm transition cursor-pointer"
                   title="Arttır"
+                  id={`stock-increase-${item.ingredientId}`}
                 >
                   +
                 </button>
                 <button
-                  onClick={() => handleDelete(item.ingredientId)}
-                  className="w-8 h-8 rounded-xl text-stone-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition ml-1"
-                  title="Kaldır"
+                  type="button"
+                  onClick={(e) => handleDelete(item.ingredientId, e)}
+                  className="w-8 h-8 rounded-xl text-stone-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition ml-1 cursor-pointer"
+                  title="Kiler Stoğundan Kaldır"
+                  id={`stock-delete-${item.ingredientId}`}
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <Trash2 className="w-4 h-4 text-rose-500" />
                 </button>
               </div>
             </div>

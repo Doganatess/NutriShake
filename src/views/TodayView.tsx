@@ -10,6 +10,7 @@ import {
   Utensils,
   HelpCircle,
   Info,
+  AlertCircle,
 } from 'lucide-react';
 import {
   UserProfile,
@@ -83,33 +84,35 @@ export const TodayView: React.FC<TodayViewProps> = ({
     onRefreshData();
   };
 
-  // Toggle Portion 1 or Portion 2 (Deducts or Reverts 50% stock)
-  const handleTogglePortion = (portionNumber: 1 | 2) => {
-    if (!plan || !masterShake) return;
+  // Toggle Portion 1 or Portion 2 (Deducts or Reverts 50% stock for specific shake)
+  const handleTogglePortion = (shakeId: string, portionNumber: 1 | 2) => {
+    if (!plan) return;
+    const targetShake = plan.shakes.find((s) => s.id === shakeId);
+    if (!targetShake) return;
 
-    const isCurrentDone = portionNumber === 1 ? isPortion1Done : isPortion2Done;
+    const isCurrentDone =
+      portionNumber === 1 ? !!targetShake.portion1Completed : !!targetShake.portion2Completed;
     const nextState = !isCurrentDone;
 
     if (nextState) {
-      const result = consumeStockForPortion(masterShake, portionNumber);
+      const result = consumeStockForPortion(targetShake, portionNumber);
       if (!result.success && result.error) {
         setStockFeedback(result.error);
         return;
       }
-      setStockFeedback(`${portionNumber}. Öğün içildi! %50 malzeme stoktan düşüldü.`);
+      setStockFeedback(`${targetShake.name} (${portionNumber}. Öğün) içildi! %50 malzeme stoktan düşüldü.`);
     } else {
-      revertStockForPortion(masterShake, portionNumber);
-      setStockFeedback(`${portionNumber}. Öğün geri alındı. %50 malzeme stoğa iade edildi.`);
+      revertStockForPortion(targetShake, portionNumber);
+      setStockFeedback(`${targetShake.name} (${portionNumber}. Öğün) geri alındı. %50 malzeme stoğa iade edildi.`);
     }
 
     setTimeout(() => setStockFeedback(null), 4000);
 
-    const p1Done = portionNumber === 1 ? nextState : isPortion1Done;
-    const p2Done = portionNumber === 2 ? nextState : isPortion2Done;
-    const fullyCompleted = p1Done && p2Done;
-
-    const updatedShakes = plan.shakes.map((s, idx) => {
-      if (idx === 0 || s.id === masterShake.id) {
+    const updatedShakes = plan.shakes.map((s) => {
+      if (s.id === shakeId) {
+        const p1Done = portionNumber === 1 ? nextState : !!s.portion1Completed;
+        const p2Done = portionNumber === 2 ? nextState : !!s.portion2Completed;
+        const fullyCompleted = p1Done && p2Done;
         return {
           ...s,
           portion1Completed: p1Done,
@@ -121,30 +124,19 @@ export const TodayView: React.FC<TodayViewProps> = ({
       return s;
     });
 
-    const updatedDailyShake = plan.dailyShake
-      ? {
-          ...plan.dailyShake,
-          portions: [
-            {
-              ...plan.dailyShake.portions[0],
-              isCompleted: p1Done,
-            },
-            {
-              ...plan.dailyShake.portions[1],
-              isCompleted: p2Done,
-            },
-          ] as [typeof plan.dailyShake.portions[0], typeof plan.dailyShake.portions[1]],
-        }
-      : undefined;
-
-    const completedCalories = (p1Done ? portion1Calories : 0) + (p2Done ? portion2Calories : 0);
+    const completedCalories = updatedShakes.reduce((sum, s) => {
+      let cal = 0;
+      const portionCal = s.portionCalories || Math.round(s.estimatedCalories / 2);
+      if (s.portion1Completed) cal += portionCal;
+      if (s.portion2Completed) cal += portionCal;
+      return sum + cal;
+    }, 0);
 
     const updatedPlan: DailyPlan = {
       ...plan,
       shakes: updatedShakes,
-      dailyShake: updatedDailyShake,
       completedCalories,
-      isFullyCompleted: fullyCompleted,
+      isFullyCompleted: updatedShakes.every((s) => s.isCompleted),
       updatedAt: new Date().toISOString(),
     };
 
@@ -297,7 +289,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
         </button>
 
         {/* Shake Plan Status / Action CTA */}
-        {plan && masterShake ? (
+        {plan && plan.shakes && plan.shakes.length > 0 ? (
           <div className="flex flex-col gap-2">
             <button
               onClick={onNavigateToPlan}
@@ -308,13 +300,13 @@ export const TodayView: React.FC<TodayViewProps> = ({
               </div>
               <div className="flex-1 min-w-0">
                 <span className="text-xs font-bold text-emerald-800 uppercase tracking-wide">
-                  Günün Shake'i
+                  Günün Shake Planı
                 </span>
                 <h3 className="text-sm font-bold text-stone-900 leading-tight">
-                  {completedPortionsCount} / 2 Porsiyon Tüketildi
+                  {plan.shakes.length} Farklı Shake Hazırlandı
                 </h3>
                 <p className="text-[11px] text-stone-600 mt-0.5 truncate">
-                  {masterShake.name} ({plannedShakeCalories} kcal)
+                  {plan.shakes.map((s) => s.name).join(' • ')}
                 </p>
               </div>
               <ChevronRight className="w-5 h-5 text-emerald-700 shrink-0" />
@@ -325,7 +317,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
               className="w-full py-2 px-3 rounded-2xl bg-white border border-emerald-200 hover:bg-emerald-50 text-emerald-800 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95 disabled:opacity-50"
             >
               <Sparkles className={`w-3.5 h-3.5 text-emerald-600 ${isGeneratingPlan ? 'animate-spin' : ''}`} />
-              <span>{isGeneratingPlan ? 'Yeniden Planlanıyor...' : 'Günün Shake Tarifini Yenile'}</span>
+              <span>{isGeneratingPlan ? 'Yeniden Planlanıyor...' : 'Günün Shake Tariflerini Yenile'}</span>
             </button>
           </div>
         ) : (
@@ -342,10 +334,10 @@ export const TodayView: React.FC<TodayViewProps> = ({
                 Günün Shake Planı
               </span>
               <h3 className="text-sm font-bold text-white leading-tight">
-                {isGeneratingPlan ? 'Plan Hazırlanıyor...' : 'Günün Shake Tarifini Oluştur'}
+                {isGeneratingPlan ? 'Plan Hazırlanıyor...' : 'Günün Shakesini Oluştur (3 Farklı Seçenek)'}
               </h3>
               <p className="text-[11px] text-emerald-100 mt-0.5 truncate">
-                Tek tarif, 2 eşit porsiyon • +5 kg hedefi doğrultusunda
+                3 farklı tarif • Kiler stoğuna tam uyumlu • 2 eşit porsiyon
               </p>
             </div>
             <ChevronRight className="w-5 h-5 text-white/70 shrink-0" />
@@ -353,153 +345,166 @@ export const TodayView: React.FC<TodayViewProps> = ({
         )}
       </div>
 
-      {/* 3. Günün Shake'i Kartı (1 Gün = 1 Tarif, 2 Eşit Porsiyon Kontrolleri) */}
-      {plan && masterShake && (
-        <div className="bg-white rounded-3xl p-4 sm:p-5 border border-stone-200 shadow-xs">
-          <div className="flex items-center justify-between mb-3">
+      {/* 3. Günün Shake Tarifleri (Kiler stoğuna uygun üretilen tüm geçerli tarifler) */}
+      {plan && plan.shakes && plan.shakes.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2">
               <span className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center text-xs font-bold">
                 🥤
               </span>
               <h3 className="text-xs font-bold uppercase tracking-wider text-stone-700">
-                Günün Shake'i (Tek Tarif • 2 Eşit Porsiyon)
+                Günün Shake Tarifleri ({plan.shakes.length} Farklı Seçenek)
               </h3>
             </div>
             <button
               onClick={onNavigateToPlan}
               className="text-xs text-emerald-700 font-semibold hover:underline flex items-center gap-1"
             >
-              Tarif & Malzemeler <ChevronRight className="w-3.5 h-3.5" />
+              Tüm Detaylar & Değiştir <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          {/* Shake Title & Macro Summary */}
-          <div className="bg-stone-50 rounded-2xl p-3.5 border border-stone-100 mb-3">
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <h4 className="text-sm font-bold text-stone-900">{masterShake.name}</h4>
-                <p className="text-[11px] text-stone-500 mt-0.5">
-                  Toplam {masterShake.estimatedCalories} kcal • {masterShake.protein}g Protein • {masterShake.carbs}g Karb • {masterShake.fat}g Yağ
-                </p>
-              </div>
-              <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 shrink-0">
-                2 Eşit Porsiyon
-              </span>
-            </div>
-
-            {/* Ingredients overview */}
-            <div className="mt-2.5 pt-2 border-t border-stone-200/60 flex flex-wrap gap-1.5">
-              {masterShake.ingredients.map((ingItem, idx) => {
-                const ing = INGREDIENT_MAP[ingItem.ingredientId];
-                return (
-                  <span
-                    key={idx}
-                    className="text-[11px] bg-white px-2 py-0.5 rounded-lg border border-stone-200 text-stone-700 flex items-center gap-1 font-medium"
-                  >
-                    <span>{ing?.icon || '🥣'}</span>
-                    <span>{ing?.name || ingItem.ingredientId}</span>
-                    <span className="text-stone-400 font-bold">({ingItem.amount}g)</span>
-                  </span>
-                );
-              })}
-            </div>
-
-            <div className="text-[11px] text-stone-600 mt-2.5 bg-emerald-50/70 p-2.5 rounded-xl border border-emerald-100 flex items-start gap-2">
-              <Info className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+          {plan.shakes.length < 3 && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-amber-900 text-xs flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
               <span>
-                <strong>Tek Seferde Hazırlayın:</strong> Bütün malzemeleri tek seferde blendere koyup karıştırın, ardından 2 eşit porsiyona (1. Öğün & 2. Öğün) ayırın. Her porsiyon {portion1Calories} kcal içerir.
+                Kiler stoğunuzdaki çeşitlilik nedeniyle {plan.shakes.length} geçerli tarif üretildi. Stok dışı uydurma malzeme eklenmemiştir.
               </span>
             </div>
-          </div>
+          )}
 
-          {/* 1. Öğün & 2. Öğün Action Cards (Portion Controls) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {/* 1. Öğün */}
-            <div
-              className={`p-3.5 rounded-2xl border transition flex flex-col justify-between ${
-                isPortion1Done
-                  ? 'bg-emerald-50/60 border-emerald-300'
-                  : 'bg-stone-50 border-stone-200'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
-                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                    isPortion1Done ? 'bg-emerald-600 text-white' : 'bg-stone-300 text-stone-700'
-                  }`}>
-                    {isPortion1Done ? '✓' : '1'}
-                  </span>
-                  1. Öğün (1. Porsiyon)
-                </span>
-                <span
-                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    isPortion1Done
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : 'bg-stone-200 text-stone-600'
-                  }`}
-                >
-                  {isPortion1Done ? 'İçildi ✓' : 'İçilmedi'}
-                </span>
-              </div>
-              <div className="text-xs text-stone-500 mb-3">
-                <strong className="text-stone-800 font-bold">{portion1Calories} kcal</strong> • Tarifin %50'si
-              </div>
-              <button
-                onClick={() => handleTogglePortion(1)}
-                className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border ${
-                  isPortion1Done
-                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                    : 'bg-white border-stone-300 text-stone-800 hover:border-emerald-400 hover:text-emerald-700'
-                }`}
-              >
-                <CheckCircle2 className={`w-3.5 h-3.5 ${isPortion1Done ? 'text-white' : 'text-stone-400'}`} />
-                <span>{isPortion1Done ? 'İçildi (Geri Al)' : '✓ 1. Öğünü İçtim'}</span>
-              </button>
-            </div>
+          {plan.shakes.map((shake, shakeIdx) => {
+            const portionCal = shake.portionCalories || Math.round(shake.estimatedCalories / 2);
+            const p1Done = !!shake.portion1Completed;
+            const p2Done = !!shake.portion2Completed;
 
-            {/* 2. Öğün */}
-            <div
-              className={`p-3.5 rounded-2xl border transition flex flex-col justify-between ${
-                isPortion2Done
-                  ? 'bg-emerald-50/60 border-emerald-300'
-                  : 'bg-stone-50 border-stone-200'
-              }`}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
-                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                    isPortion2Done ? 'bg-emerald-600 text-white' : 'bg-stone-300 text-stone-700'
-                  }`}>
-                    {isPortion2Done ? '✓' : '2'}
-                  </span>
-                  2. Öğün (2. Porsiyon)
-                </span>
-                <span
-                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    isPortion2Done
-                      ? 'bg-emerald-100 text-emerald-800'
-                      : 'bg-stone-200 text-stone-600'
-                  }`}
-                >
-                  {isPortion2Done ? 'İçildi ✓' : 'İçilmedi'}
-                </span>
+            return (
+              <div key={shake.id || shakeIdx} className="bg-white rounded-3xl p-4 sm:p-5 border border-stone-200 shadow-xs">
+                {/* Shake Title & Macro Summary */}
+                <div className="bg-stone-50 rounded-2xl p-3.5 border border-stone-100 mb-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-stone-200 text-stone-700">
+                          Shake {shakeIdx + 1}
+                        </span>
+                        <h4 className="text-sm font-bold text-stone-900">{shake.name}</h4>
+                      </div>
+                      <p className="text-[11px] text-stone-500 mt-1">
+                        Toplam {shake.estimatedCalories} kcal • {shake.protein}g Protein • {shake.carbs}g Karb • {shake.fat}g Yağ
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 shrink-0">
+                      2 Eşit Porsiyon
+                    </span>
+                  </div>
+
+                  {/* Ingredients overview */}
+                  <div className="mt-2.5 pt-2 border-t border-stone-200/60 flex flex-wrap gap-1.5">
+                    {shake.ingredients.map((ingItem, idx) => {
+                      const ing = INGREDIENT_MAP[ingItem.ingredientId];
+                      return (
+                        <span
+                          key={idx}
+                          className="text-[11px] bg-white px-2 py-0.5 rounded-lg border border-stone-200 text-stone-700 flex items-center gap-1 font-medium"
+                        >
+                          <span>{ing?.icon || '🥣'}</span>
+                          <span>{ing?.name || ingItem.ingredientId}</span>
+                          <span className="text-stone-400 font-bold">({ingItem.amount}g)</span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 1. Öğün & 2. Öğün Action Cards (Portion Controls) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {/* 1. Öğün */}
+                  <div
+                    className={`p-3.5 rounded-2xl border transition flex flex-col justify-between ${
+                      p1Done ? 'bg-emerald-50/60 border-emerald-300' : 'bg-stone-50 border-stone-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
+                        <span
+                          className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                            p1Done ? 'bg-emerald-600 text-white' : 'bg-stone-300 text-stone-700'
+                          }`}
+                        >
+                          {p1Done ? '✓' : '1'}
+                        </span>
+                        1. Öğün (1. Porsiyon)
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          p1Done ? 'bg-emerald-100 text-emerald-800' : 'bg-stone-200 text-stone-600'
+                        }`}
+                      >
+                        {p1Done ? 'İçildi ✓' : 'İçilmedi'}
+                      </span>
+                    </div>
+                    <div className="text-xs text-stone-500 mb-3">
+                      <strong className="text-stone-800 font-bold">{portionCal} kcal</strong> • Tarifin %50'si
+                    </div>
+                    <button
+                      onClick={() => handleTogglePortion(shake.id, 1)}
+                      className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border ${
+                        p1Done
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                          : 'bg-white border-stone-300 text-stone-800 hover:border-emerald-400 hover:text-emerald-700'
+                      }`}
+                    >
+                      <CheckCircle2 className={`w-3.5 h-3.5 ${p1Done ? 'text-white' : 'text-stone-400'}`} />
+                      <span>{p1Done ? 'İçildi (Geri Al)' : '✓ 1. Öğünü İçtim'}</span>
+                    </button>
+                  </div>
+
+                  {/* 2. Öğün */}
+                  <div
+                    className={`p-3.5 rounded-2xl border transition flex flex-col justify-between ${
+                      p2Done ? 'bg-emerald-50/60 border-emerald-300' : 'bg-stone-50 border-stone-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
+                        <span
+                          className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                            p2Done ? 'bg-emerald-600 text-white' : 'bg-stone-300 text-stone-700'
+                          }`}
+                        >
+                          {p2Done ? '✓' : '2'}
+                        </span>
+                        2. Öğün (2. Porsiyon)
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          p2Done ? 'bg-emerald-100 text-emerald-800' : 'bg-stone-200 text-stone-600'
+                        }`}
+                      >
+                        {p2Done ? 'İçildi ✓' : 'İçilmedi'}
+                      </span>
+                    </div>
+                    <div className="text-xs text-stone-500 mb-3">
+                      <strong className="text-stone-800 font-bold">{portionCal} kcal</strong> • Tarifin %50'si
+                    </div>
+                    <button
+                      onClick={() => handleTogglePortion(shake.id, 2)}
+                      className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border ${
+                        p2Done
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                          : 'bg-white border-stone-300 text-stone-800 hover:border-emerald-400 hover:text-emerald-700'
+                      }`}
+                    >
+                      <CheckCircle2 className={`w-3.5 h-3.5 ${p2Done ? 'text-white' : 'text-stone-400'}`} />
+                      <span>{p2Done ? 'İçildi (Geri Al)' : '✓ 2. Öğünü İçtim'}</span>
+                    </button>
+                  </div>
+                </div>
               </div>
-              <div className="text-xs text-stone-500 mb-3">
-                <strong className="text-stone-800 font-bold">{portion2Calories} kcal</strong> • Tarifin %50'si
-              </div>
-              <button
-                onClick={() => handleTogglePortion(2)}
-                className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border ${
-                  isPortion2Done
-                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                    : 'bg-white border-stone-300 text-stone-800 hover:border-emerald-400 hover:text-emerald-700'
-                }`}
-              >
-                <CheckCircle2 className={`w-3.5 h-3.5 ${isPortion2Done ? 'text-white' : 'text-stone-400'}`} />
-                <span>{isPortion2Done ? 'İçildi (Geri Al)' : '✓ 2. Öğünü İçtim'}</span>
-              </button>
-            </div>
-          </div>
+            );
+          })}
         </div>
       )}
 

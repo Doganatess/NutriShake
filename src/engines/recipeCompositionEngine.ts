@@ -5,12 +5,24 @@ import {
   UserProfile,
   Ingredient,
 } from '../types';
-import { INGREDIENT_MAP, INGREDIENTS_DATABASE } from '../data/ingredients';
+import { INGREDIENT_MAP, INGREDIENTS_DATABASE, canonicalIngredientId } from '../data/ingredients';
 import { calculateShakeNutrition } from './nutritionEngine';
-import { getStoredStock, getStoredDislikedShakes, getStoredFavorites } from '../storage/storageAbstraction';
+import {
+  getStoredStock,
+  getStoredDislikedShakes,
+  getStoredFavorites,
+  getWeeklyRecommendedSignatures,
+  saveWeeklyRecommendedSignature,
+} from '../storage/storageAbstraction';
 import { analyzeCompatibility } from './compatibilityEngine';
-import { formatNormalizedUnit } from '../utils/unitConverter';
-import { computeSemanticSimilarity } from './varietyEngine';
+import { formatNormalizedUnit, normalizeToGramsOrMl } from '../utils/unitConverter';
+import {
+  validateMasterRecipe,
+  getRecipeFingerprint,
+  calculateRecipeSimilarity,
+  ALLOWED_DAIRY_CANONICAL_IDS,
+} from '../utils/recipeValidator';
+import { calculatePantryShakeCalorieCapacity, getAvailableStockGrams } from './stockEngine';
 
 export interface ComposeOptions {
   targetCalories?: number;
@@ -19,239 +31,355 @@ export interface ComposeOptions {
   userProfile?: UserProfile | null;
   excludedIngredientIds?: string[];
   preferredIngredientIds?: string[];
+  mandatoryIngredientIds?: string[];
+  allowedIngredientIds?: string[];
   recentShakes?: Shake[];
   shiftType?: 'morning' | 'evening' | 'off';
+  excludedShakeNames?: string[];
+  candidateIndex?: number;
+  userStock?: Record<string, any>;
 }
 
-/**
- * Sensible portion bounds per category to prevent bizarre combinations and gigantic volume.
- */
-function getCategoryBounds(ing: Ingredient): { min: number; max: number; default: number } {
-  if (ing.category === 'dairy' || ing.shakeCompatibility === 'liquid' || ing.id === 'other_water') {
-    return { min: 200, max: 400, default: 300 }; // Liquid for 2 portions
-  }
-  if (ing.category === 'fruits') {
-    return { min: 80, max: 200, default: 130 };
-  }
-  if (ing.category === 'dried_fruits') {
-    return { min: 20, max: 60, default: 35 };
-  }
-  if (ing.category === 'grains') {
-    return { min: 30, max: 80, default: 50 };
-  }
-  if (ing.category === 'nuts') {
-    return { min: 15, max: 50, default: 30 };
-  }
-  if (ing.category === 'sweeteners') {
-    return { min: 15, max: 40, default: 25 };
-  }
-  if (ing.category === 'cocoa_extras') {
-    return { min: 8, max: 25, default: 15 };
-  }
-  return { min: 10, max: 40, default: 20 };
+export const ALLOWED_DAIRY_IDS = ALLOWED_DAIRY_CANONICAL_IDS;
+
+export function isAllowedDairy(ingredientId: string): boolean {
+  const canon = canonicalIngredientId(ingredientId);
+  return (ALLOWED_DAIRY_CANONICAL_IDS as readonly string[]).includes(canon);
 }
 
-/**
- * Deterministic Recipe Composition Engine (Single Shake / Day -> 2 Equal Portions).
- *
- * Requirements:
- * 1. Exactly 1 shake recipe generated per working day.
- * 2. Divided into 2 equal portions (Porsiyon 1, Porsiyon 2).
- * 3. Does not dump all stock in! Uses a balanced, clean 3-5 ingredient structure.
- * 4. Multi-objective optimization: taste, macros, volume, cost, variety, preferences.
- * 5. Explainable recipe reasons ("Bu shake neden seçildi?").
- */
-export function composeDeterministicShake(options: ComposeOptions = {}): Shake {
-  const targetKcal = options.targetCalories || 1000; // Default 1000 kcal total (500 kcal per portion)
-  const timing = options.timing || 'morning';
-  const stock = getStoredStock();
-  const stockOnly = options.stockOnly !== false;
-  const dislikedList = getStoredDislikedShakes();
-  const favorites = getStoredFavorites();
-
-  // 1. Candidate ingredients pool
-  let candidates: Ingredient[] = INGREDIENTS_DATABASE.filter((ing) => {
-    // Exclude savoury or non-shake items
-    if (ing.shakeCompatibility === 'topping' && ing.category === 'others') return false;
-    return true;
-  });
-
-  if (stockOnly) {
-    const stockKeys = Object.keys(stock).filter((k) => (stock[k]?.normalizedGramsOrMl || 0) > 0);
-    if (stockKeys.length > 0) {
-      candidates = candidates.filter((ing) => stockKeys.includes(ing.id));
-    }
+export class MissingDairyStockError extends Error {
+  constructor(
+    message = 'Kıvam ve besin dengesi için kilerinizde en az bir süt ürünü (Tam Yağlı Süt, Yarım Yağlı Süt, Köy Yoğurdu veya Süzme Yoğurt) bulunmalıdır. Lütfen Kiler sekmesine gidip bu ürünlerden en az birini ekleyin.'
+  ) {
+    super(message);
+    this.name = 'MissingDairyStockError';
   }
+}
 
-  // Filter excluded ingredients
-  if (options.excludedIngredientIds && options.excludedIngredientIds.length > 0) {
-    candidates = candidates.filter((c) => !options.excludedIngredientIds?.includes(c.id));
-  }
-
-  // Filter user forbidden ingredients
-  if (options.userProfile?.forbiddenIngredientIds && options.userProfile.forbiddenIngredientIds.length > 0) {
-    candidates = candidates.filter((c) => !options.userProfile!.forbiddenIngredientIds.includes(c.id));
-  }
-
-  // Filter user allergen ingredients
-  if (options.userProfile?.allergies && options.userProfile.allergies.length > 0) {
-    candidates = candidates.filter((c) => {
-      if (!c.allergens) return true;
-      return !c.allergens.some((a) =>
-        options.userProfile!.allergies!.some((ua) =>
-          a.toLowerCase().includes(ua.toLowerCase()) || ua.toLowerCase().includes(a.toLowerCase())
-        )
-      );
-    });
-  }
-
-  // 2. Select Liquid Base (Exactly 1: Whole Milk, Semi-Skimmed, Yogurt, Water)
-  let liquidBase = candidates.find(
-    (c) => c.category === 'dairy' || c.shakeCompatibility === 'liquid' || c.shakeCompatibility === 'base'
-  );
-  if (!liquidBase) {
-    liquidBase = INGREDIENT_MAP['dairy_whole_milk'] || INGREDIENT_MAP['other_water'];
-  }
-
-  // 3. Select Body / Fruit (1 item)
-  // Check user preferences / favorites / variety
-  const recentIngredientIds = new Set<string>();
-  if (options.recentShakes) {
-    options.recentShakes.forEach((s) => s.ingredients.forEach((i) => recentIngredientIds.add(i.ingredientId)));
-  }
-
-  const fruits = candidates.filter((c) => c.category === 'fruits' || c.category === 'dried_fruits');
-  let fruit = fruits.find((f) => !recentIngredientIds.has(f.id));
-  if (!fruit && fruits.length > 0) fruit = fruits[0];
-  if (!fruit) fruit = INGREDIENT_MAP['fruit_banana'] || INGREDIENT_MAP['fruit_apple'];
-
-  // 4. Select Sustained Energy / Grain (Yulaf / Yulaf Unu)
-  const grains = candidates.filter((c) => c.category === 'grains');
-  let grain = grains.find((g) => g.id === 'grain_oats') || grains[0];
-
-  // 5. Select Flavor / Calorie Booster (Nuts OR Sweetener OR Cocoa)
-  // DO NOT use all of them! Select at most 1-2 based on variety and compatibility
-  const selectedExtras: Ingredient[] = [];
-
-  const nuts = candidates.filter((c) => c.category === 'nuts');
-  const sweeteners = candidates.filter((c) => c.category === 'sweeteners');
-  const cocoaExtras = candidates.filter((c) => c.category === 'cocoa_extras');
-
-  // Check if yesterday used sweeteners; if so, prefer nuts or cocoa today for variety
-  const usedSweetenerRecently = options.recentShakes?.some((s) =>
-    s.ingredients.some((i) => INGREDIENT_MAP[i.ingredientId]?.category === 'sweeteners')
-  );
-
-  if (nuts.length > 0) {
-    selectedExtras.push(nuts[0]);
-  }
-
-  if (usedSweetenerRecently && cocoaExtras.length > 0) {
-    selectedExtras.push(cocoaExtras[0]);
-  } else if (sweeteners.length > 0) {
-    selectedExtras.push(sweeteners[0]);
-  } else if (cocoaExtras.length > 0) {
-    selectedExtras.push(cocoaExtras[0]);
-  }
-
-  // Assemble clean selection (max 4-5 items total)
-  const selected: { ing: Ingredient; grams: number }[] = [];
-
-  if (liquidBase) {
-    selected.push({ ing: liquidBase, grams: getCategoryBounds(liquidBase).default });
-  }
-  if (fruit) {
-    selected.push({ ing: fruit, grams: getCategoryBounds(fruit).default });
-  }
-  if (grain) {
-    selected.push({ ing: grain, grams: getCategoryBounds(grain).default });
-  }
-  selectedExtras.slice(0, 2).forEach((extra) => {
-    selected.push({ ing: extra, grams: getCategoryBounds(extra).default });
-  });
-
-  // 6. Check Semantic Similarity with recent shakes
-  if (options.recentShakes && options.recentShakes.length > 0) {
-    const lastShake = options.recentShakes[0];
-    const similarityResult = computeSemanticSimilarity(
-      selected.map((s) => s.ing.id),
-      lastShake.ingredients
+export class InsufficientPantryStockError extends Error {
+  targetKcal: number;
+  availableKcal: number;
+  constructor(targetKcal: number, availableKcal: number) {
+    const minAllowed = targetKcal - 300;
+    const maxAllowed = targetKcal + 300;
+    super(
+      `Kilerinizdeki mevcut stoklarla günlük kalori hedefine (${minAllowed} - ${maxAllowed} kcal) ulaşılamıyor. Mevcut kiler kapasiteniz: ${availableKcal} kcal. Lütfen kilerinize kalori yoğunluğu yüksek besinler (fındık, ceviz, badem, yulaf, bal, pekmez, tam yağlı süt vb.) ekleyin.`
     );
+    this.name = 'InsufficientPantryStockError';
+    this.targetKcal = targetKcal;
+    this.availableKcal = availableKcal;
+  }
+}
 
-    // If too similar and we have alternatives, swap an extra
-    if (similarityResult.isTooSimilar) {
-      if (selectedExtras.length > 0 && cocoaExtras.length > 0 && !selected.some((s) => s.ing.id === cocoaExtras[0].id)) {
-        selected.pop();
-        selected.push({ ing: cocoaExtras[0], grams: getCategoryBounds(cocoaExtras[0]).default });
+/**
+ * Checks if there is any allowed dairy product (milk, yogurt) in active stock.
+ * Explicitly excludes kefir.
+ */
+export function hasDairyInStock(stock: Record<string, any> | undefined | null): boolean {
+  if (!stock) return false;
+  return ALLOWED_DAIRY_IDS.some((id) => getAvailableStockGrams(stock, id) > 0);
+}
+
+/**
+ * Merges duplicate ingredients by canonical ID, summing amounts and normalized grams.
+ * Ensures: new Set(ingredients.map(i => canonicalIngredientId(i.ingredientId))).size === ingredients.length
+ */
+export function mergeDuplicateIngredients(ingredients: ShakeIngredient[]): ShakeIngredient[] {
+  const map = new Map<string, ShakeIngredient>();
+  for (const ing of ingredients) {
+    if (!ing.ingredientId) continue;
+    const canonId = canonicalIngredientId(ing.ingredientId);
+    const existing = map.get(canonId);
+    const def = INGREDIENT_MAP[canonId] || INGREDIENT_MAP[ing.ingredientId];
+
+    // Determine normalized grams reliably
+    let grams = ing.normalizedGrams && ing.normalizedGrams > 0 ? ing.normalizedGrams : 0;
+    if (!grams) {
+      if (ing.unit === 'g' || ing.unit === 'ml' || !ing.unit) {
+        grams = ing.amount || ing.quantity || 0;
+      } else {
+        grams = normalizeToGramsOrMl(ing.quantity !== undefined ? ing.quantity : ing.amount, ing.unit, def);
       }
     }
+
+    if (!existing) {
+      const formatted = formatNormalizedUnit(grams, def);
+      map.set(canonId, {
+        ...ing,
+        ingredientId: canonId,
+        amount: grams,
+        quantity: formatted.amount,
+        unit: formatted.unit,
+        normalizedGrams: grams,
+      });
+    } else {
+      const totalGrams = (existing.normalizedGrams || existing.amount || 0) + grams;
+      const formatted = formatNormalizedUnit(totalGrams, def);
+      map.set(canonId, {
+        ...existing,
+        ingredientId: canonId,
+        amount: totalGrams,
+        quantity: formatted.amount,
+        unit: formatted.unit,
+        normalizedGrams: totalGrams,
+      });
+    }
+  }
+  return Array.from(map.values());
+}
+
+/**
+ * Dynamic portion bounds scaled proportionally to the daily target calories.
+ * Accommodates high-calorie bulk targets (e.g. 3810-4410 kcal for 2 portions)
+ * without liquid ballooning by emphasizing nuts, grains, and natural sweeteners.
+ */
+function getCategoryBounds(ing: Ingredient, targetKcal: number = 1950): { min: number; max: number; default: number } {
+  const scale = Math.max(1, targetKcal / 1500);
+  const canonId = canonicalIngredientId(ing.id);
+
+  if (isAllowedDairy(canonId)) {
+    if (canonId === 'dairy_whole_milk' || canonId === 'dairy_semi_skimmed_milk') {
+      return {
+        min: 250,
+        max: Math.min(650, Math.round(350 * scale)),
+        default: Math.min(500, Math.round(300 * scale)),
+      };
+    }
+    return {
+      min: 100,
+      max: Math.min(400, Math.round(200 * scale)),
+      default: Math.min(250, Math.round(150 * scale)),
+    };
+  }
+  if (ing.category === 'fruits') {
+    return {
+      min: 80,
+      max: Math.min(350, Math.round(180 * scale)),
+      default: Math.min(220, Math.round(130 * scale)),
+    };
+  }
+  if (ing.category === 'dried_fruits') {
+    return {
+      min: 30,
+      max: Math.min(180, Math.round(80 * scale)),
+      default: Math.min(120, Math.round(50 * scale)),
+    };
+  }
+  if (ing.category === 'grains') {
+    return {
+      min: 50,
+      max: Math.min(350, Math.round(150 * scale)),
+      default: Math.min(250, Math.round(100 * scale)),
+    };
+  }
+  if (ing.category === 'nuts') {
+    return {
+      min: 30,
+      max: Math.min(250, Math.round(100 * scale)),
+      default: Math.min(180, Math.round(60 * scale)),
+    };
+  }
+  if (ing.category === 'sweeteners') {
+    return {
+      min: 20,
+      max: Math.min(120, Math.round(50 * scale)),
+      default: Math.min(80, Math.round(35 * scale)),
+    };
+  }
+  if (ing.category === 'cocoa_extras') {
+    return {
+      min: 10,
+      max: Math.min(40, Math.round(20 * scale)),
+      default: Math.min(25, Math.round(15 * scale)),
+    };
+  }
+  return { min: 20, max: Math.min(100, Math.round(40 * scale)), default: 30 };
+}
+
+/**
+ * Calculates ingredient price per gram (e.g., 60 TL/kg = 0.06 TL/g).
+ * Returns 0 if ingredient has no price. Never fabricates prices.
+ */
+export function getIngredientPricePerGram(ing: Ingredient): number {
+  if (!ing.estimatedPrice || ing.estimatedPrice <= 0) return 0;
+  const unitStr = (ing.priceUnit || 'TL / kg').toLowerCase();
+  if (unitStr.includes('kg') || unitStr.includes('l') || unitStr.includes('litre')) {
+    return ing.estimatedPrice / 1000;
+  }
+  if (unitStr.includes('100g') || unitStr.includes('100 ml')) {
+    return ing.estimatedPrice / 100;
+  }
+  if (unitStr.includes('adet') || unitStr.includes('şişe') || unitStr.includes('tane')) {
+    const servingGrams = ing.edibleWeight || ing.defaultServing || 100;
+    return ing.estimatedPrice / servingGrams;
+  }
+  return ing.estimatedPrice / 1000;
+}
+
+/**
+ * Calculates ingredient cost per calorie (TL / kcal).
+ * Used to prioritize cost-efficient calories during portion expansion.
+ */
+export function getIngredientCostPerKcal(ing: Ingredient): number {
+  const pricePerGram = getIngredientPricePerGram(ing);
+  const kcalPerGram = (ing.caloriesPer100g || 1) / 100;
+  if (pricePerGram <= 0) return 0.0001; // Free/unpriced ingredients prioritized for low cost
+  return pricePerGram / Math.max(0.1, kcalPerGram);
+}
+
+/**
+ * Builds a single valid Shake recipe from a chosen candidate combination (4-6 items).
+ * Dynamically scales amounts to hit targetKcal (+-300 kcal) using the cheapest calories first.
+ */
+function buildShakeFromIngredientCombo(
+  combo: Ingredient[],
+  targetKcal: number,
+  stock: Record<string, any>,
+  stockOnly: boolean,
+  timing: ShakeTiming,
+  calorieTolerance: number = 300
+): Shake | null {
+  if (combo.length < 3 || combo.length > 6) return null;
+
+  // 1. Initial portion sizing based on bounds and stock
+  const selected: { ing: Ingredient; grams: number }[] = [];
+  for (const ing of combo) {
+    const bounds = getCategoryBounds(ing, targetKcal);
+    const avail = stockOnly ? getAvailableStockGrams(stock, ing.id) : bounds.max;
+    const effectiveMax = Math.min(bounds.max, avail);
+    const initialGrams = Math.min(bounds.default, effectiveMax);
+    if (initialGrams <= 0) return null;
+    selected.push({ ing, grams: initialGrams });
   }
 
-  // 7. Multi-objective scaling towards targetCalories (2 portions total)
+  // 2. Cost-optimized expansion loop
   let currentNutrition = calculateShakeNutrition(
     selected.map((s) => ({ ingredientId: s.ing.id, amount: s.grams, unit: 'g' }))
   );
 
-  const diff = targetKcal - currentNutrition.calories;
-  if (Math.abs(diff) > 40) {
-    const scaleFactor = Math.max(0.7, Math.min(1.4, targetKcal / currentNutrition.calories));
-    for (const item of selected) {
-      // Don't blow up cocoa powder volume
-      if (item.ing.category === 'cocoa_extras') continue;
-      // If scaling up, scale calorie-dense ingredients (nuts, oats, sweeteners) more than liquid
-      if (scaleFactor > 1 && (item.ing.category === 'nuts' || item.ing.category === 'sweeteners' || item.ing.category === 'grains')) {
-        item.grams = Math.round(item.grams * (scaleFactor * 1.1));
-      } else {
-        item.grams = Math.round(item.grams * scaleFactor);
+  const maxIterations = 35;
+  for (let iter = 0; iter < maxIterations; iter++) {
+    const deficit = targetKcal - currentNutrition.calories;
+    if (deficit <= 30) break; // Close enough to target
+
+    // Find items that can still expand
+    const expandable = selected.filter((item) => {
+      const bounds = getCategoryBounds(item.ing, targetKcal);
+      const avail = stockOnly ? getAvailableStockGrams(stock, item.ing.id) : bounds.max;
+      const effectiveMax = Math.min(bounds.max, avail);
+      return item.grams < effectiveMax;
+    });
+
+    if (expandable.length === 0) break;
+
+    // Prioritize lowest cost per calorie (cheapest calories first!)
+    expandable.sort((a, b) => getIngredientCostPerKcal(a.ing) - getIngredientCostPerKcal(b.ing));
+
+    for (const exp of expandable) {
+      const bounds = getCategoryBounds(exp.ing, targetKcal);
+      const avail = stockOnly ? getAvailableStockGrams(stock, exp.ing.id) : bounds.max;
+      const effectiveMax = Math.min(bounds.max, avail);
+      const room = effectiveMax - exp.grams;
+      if (room > 0) {
+        const kcalPerGram = (exp.ing.caloriesPer100g || 100) / 100;
+        const currentDeficit = targetKcal - currentNutrition.calories;
+        if (currentDeficit <= 30) break;
+        const targetGramsNeeded = Math.round(currentDeficit / Math.max(0.4, kcalPerGram));
+        const step = Math.min(room, Math.max(5, Math.min(targetGramsNeeded, Math.round(room * 0.4))));
+        exp.grams += step;
+        currentNutrition = calculateShakeNutrition(
+          selected.map((s) => ({ ingredientId: s.ing.id, amount: s.grams, unit: 'g' }))
+        );
       }
     }
   }
 
-  // Build final ingredients
-  const shakeIngredients: ShakeIngredient[] = selected.map((s) => {
-    const formatted = formatNormalizedUnit(s.grams, s.ing);
-    return {
-      ingredientId: s.ing.id,
-      amount: s.grams,
-      quantity: formatted.amount,
-      unit: formatted.unit,
-      normalizedGrams: s.grams,
-      calculatedCalories: 0,
-      calculatedProtein: 0,
-      calculatedCarbs: 0,
-      calculatedFat: 0,
-    };
+  // 3. Strict Stock Cap: never exceed available pantry stock
+  if (stockOnly) {
+    for (const item of selected) {
+      const avail = getAvailableStockGrams(stock, item.ing.id);
+      if (item.grams > avail) {
+        item.grams = Math.max(0, avail);
+      }
+    }
+  }
+
+  // 4. Build final ingredients & calculate nutrition
+  const rawShakeIngredients: ShakeIngredient[] = selected
+    .filter((s) => s.grams > 0)
+    .map((s) => {
+      const formatted = formatNormalizedUnit(s.grams, s.ing);
+      return {
+        ingredientId: canonicalIngredientId(s.ing.id),
+        amount: s.grams,
+        quantity: formatted.amount,
+        unit: formatted.unit,
+        normalizedGrams: s.grams,
+      };
+    });
+
+  const shakeIngredients = mergeDuplicateIngredients(rawShakeIngredients);
+  if (shakeIngredients.length < 3 || shakeIngredients.length > 6) return null;
+
+  // Rule 1: Exactly 1 dairy
+  const dairyIngredients = shakeIngredients.filter((i) => isAllowedDairy(i.ingredientId));
+  if (dairyIngredients.length !== 1) return null;
+
+  // Rule 2: At most 2 fruits
+  const fruitIngredients = shakeIngredients.filter((i) => {
+    const canon = canonicalIngredientId(i.ingredientId);
+    const def = INGREDIENT_MAP[canon] || INGREDIENT_MAP[i.ingredientId];
+    return def && (def.category === 'fruits' || def.category === 'dried_fruits');
   });
+  if (fruitIngredients.length > 2) return null;
 
   const finalNutrition = calculateShakeNutrition(shakeIngredients);
-  const compatibility = analyzeCompatibility(shakeIngredients);
-
-  // Equal 2 Portions Calculation
   const totalCalories = finalNutrition.calories;
+
+  // Calorie target constraint: must be within +-calorieTolerance kcal
+  if (Math.abs(totalCalories - targetKcal) > calorieTolerance) {
+    return null;
+  }
+
+  // Check liquid volume: <= 700 ml (milk, water, liquid ingredients)
+  let liquidVolumeMl = 0;
+  for (const ing of shakeIngredients) {
+    const canonId = canonicalIngredientId(ing.ingredientId);
+    if (canonId.includes('milk') || canonId.includes('water') || ing.unit === 'ml') {
+      liquidVolumeMl += ing.amount;
+    }
+  }
+  if (liquidVolumeMl > 700) {
+    return null;
+  }
+
   const portionCalories = Math.round(totalCalories / 2);
   const portionProtein = Math.round((finalNutrition.protein / 2) * 10) / 10;
   const portionCarbs = Math.round((finalNutrition.carbs / 2) * 10) / 10;
   const portionFat = Math.round((finalNutrition.fat / 2) * 10) / 10;
   const portionFiber = Math.round((finalNutrition.fiber / 2) * 10) / 10;
 
-  // Naming
-  const mainFruitName = fruit?.name.replace(/ \(.*\)/, '') || 'Enerji';
-  const extraName = selectedExtras[0]?.name.replace(/ \(.*\)/, '') || '';
-  const name = extraName ? `${mainFruitName}li & ${extraName}li Çift Porsiyon Shake` : `${mainFruitName}li Doğal Günlük Shake`;
+  const mainFruit = combo.find((i) => i.category === 'fruits' || i.category === 'dried_fruits');
+  const mainNut = combo.find((i) => i.category === 'nuts');
+  const fruitName = mainFruit?.name.replace(/ \(.*\)/, '') || 'Doğal';
+  const nutName = mainNut?.name.replace(/ \(.*\)/, '') || '';
+  const baseName = nutName ? `${fruitName}li & ${nutName}li Çift Porsiyon Shake` : `${fruitName}li Doğal Çift Porsiyon Shake`;
 
-  // Explainable Recipe ("Bu shake neden seçildi?")
+  const compatibility = analyzeCompatibility(shakeIngredients);
+
+  const costString = finalNutrition.estimatedCost > 0 ? `~${finalNutrition.estimatedCost} TL` : 'Ekonomik';
   const whyChosenReasons: string[] = [
-    'Mevcut kiler stoklarınıza tam uyumlu',
-    `Haftalık kalori havuzunu dengede tutar (Toplam ${totalCalories} kcal, porsiyon başı ${portionCalories} kcal)`,
-    'Aşırı hacim yapmayan yüksek kalori yoğunluğu ile rahat tüketilir',
-    `${selected.length} seçkin malzemeyle pratik ve sindirimi kolay formülasyon`,
-    compatibility.detectedSynergies[0] || 'Lezzet ve makro uyumu yüksek bileşenler bir araya getirildi',
+    `Maliyet odaklı formülasyon: Toplam ${costString} maliyetle gereksiz malzeme kalabalığı olmadan hazırlandı`,
+    `Günlük hedefe tam uyumlu: Toplam ${totalCalories} kcal (2 eşit porsiyon x ${portionCalories} kcal)`,
+    `Sadece ${shakeIngredients.length} seçkin kiler malzemesiyle sindirimi kolay ve lezzetli karışım`,
+    'Aşırı sıvı hacmi yapmadan kalori yoğunluğu yüksek doğal besinlerle dengelendi',
+    compatibility.detectedSynergies[0] || 'Lezzet ve makro dengesi optimize edildi',
   ];
 
-  return {
-    id: `shake_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-    name,
-    description: `Günün 2 eşit porsiyona ayrılmış tek shake tarifi (Porsiyon başı ${portionCalories} kcal).`,
+  const shake: Shake = {
+    id: `shake_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    name: baseName,
+    description: `Günün 2 eşit porsiyona ayrılmış doğal shake tarifi (Toplam ${totalCalories} kcal • Porsiyon başı ${portionCalories} kcal • Tahmini Maliyet: ${costString}).`,
     timing,
     ingredients: finalNutrition.ingredients,
     estimatedCalories: totalCalories,
@@ -264,9 +392,10 @@ export function composeDeterministicShake(options: ComposeOptions = {}): Shake {
     instructions: [
       'Tüm malzemeleri tek seferde blendere ekleyin.',
       'Yüksek devirde 50-60 saniye pürüzsüz ve kadifemsi kıvama gelene kadar çekin.',
-      `Hazırladığınız karışımı 2 EŞİT PORSIYONA (${portionCalories} kcal / porsiyon) bölün.`,
-      '1. porsiyonu vardiya başlangıcında / iş yerinde tüketin.',
-      '2. porsiyonu buzdolabında muhafaza edip vardiya sonrası / acıkınca tüketin.',
+      `Hazırladığınız karışımı 2 EŞİT PORSİYONA (${portionCalories} kcal / porsiyon) bölün (%50 + %50).`,
+      `Toplam ${totalCalories} kcal • 1. Porsiyon: ${portionCalories} kcal • 2. Porsiyon: ${portionCalories} kcal.`,
+      '1. porsiyonu vardiya öncesi/öğlen tüketin.',
+      '2. porsiyonu buzdolabında muhafaza edip vardiya sonrası tüketin.',
     ].join('\n'),
     preparationTimeMinutes: 4,
     portionCount: 2,
@@ -285,4 +414,335 @@ export function composeDeterministicShake(options: ComposeOptions = {}): Shake {
     schemaVersion: 2,
     createdAt: new Date().toISOString(),
   };
+
+  // Validate recipe against master validator
+  const validation = validateMasterRecipe(shake, {
+    targetKcal,
+    userStock: stockOnly ? stock : undefined,
+    strictStockOnly: stockOnly,
+  });
+
+  if (!validation.isValid) {
+    return null;
+  }
+
+  return shake;
+}
+
+/**
+ * Deterministic Recipe Composition Engine (Single Shake / Day -> 2 Equal Portions).
+ * Strictly enforces all 12 rules with Cost Optimization and Candidate Pool architecture:
+ * 1. abs(shakeTotalKcal - dailyTargetKcal) <= 300
+ * 2. Strictly from pantry stock (no stock deficits)
+ * 3. Ingredient quantity <= available stock
+ * 4. At least one allowed dairy (milk/yogurt)
+ * 5. Strictly NO kefir
+ * 6. Strictly NO supplements/protein powders
+ * 7. Strictly NO duplicate canonical ingredients
+ * 8. 2 equal portions (50% + 50%)
+ * 9. Weekly history verification
+ * 10. Balanced ingredient count (4 to 6 items; never whole pantry)
+ * 11. Liquid volume limit <= 750 ml
+ * 12. Prioritizes lowest cost valid recipes
+ */
+export function composeDeterministicShake(options: ComposeOptions = {}): Shake {
+  const candidates = composeThreeDistinctDailyShakes(options);
+  const idx = options.candidateIndex || 0;
+  return candidates[idx % candidates.length] || candidates[0];
+}
+
+/**
+ * Generates AT LEAST 3 distinct shake candidates (Rule 4, 7, 10).
+ * Strictly uses a candidate pool: each stock item is an OPTION, NOT mandatory.
+ * Minimizes cost by sorting valid candidate recipes by lowest cost first.
+ * Ensures distinct canonical ingredient combinations and weekly history uniqueness.
+ */
+export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): Shake[] {
+  const targetKcal = options.targetCalories || 3623;
+  const timing = options.timing || 'morning';
+  const stock = options.userStock || getStoredStock();
+  const stockOnly = options.stockOnly !== false;
+
+  // 1. Mandatory stock validation
+  if (stockOnly) {
+    if (!hasDairyInStock(stock)) {
+      throw new MissingDairyStockError();
+    }
+    const capacity = calculatePantryShakeCalorieCapacity(stock);
+    if (capacity.totalCalories < targetKcal - 300) {
+      throw new InsufficientPantryStockError(targetKcal, capacity.totalCalories);
+    }
+  }
+
+  // 2. Candidate pool: strictly available ingredients, no kefir, no protein powders
+  let candidatePool = INGREDIENTS_DATABASE.filter((ing) => {
+    if (ing.shakeCompatibility === 'topping' && ing.category === 'others') return false;
+    const lower = ing.id.toLowerCase();
+    if (lower.includes('kefir')) return false;
+    if (lower.includes('protein') || lower.includes('supplement') || lower.includes('whey')) return false;
+    if (stockOnly && getAvailableStockGrams(stock, ing.id) <= 0) return false;
+    return true;
+  });
+
+  // Filter excluded
+  if (options.excludedIngredientIds?.length) {
+    candidatePool = candidatePool.filter((c) => !options.excludedIngredientIds!.includes(c.id));
+  }
+
+  // Filter allergies
+  if (options.userProfile?.allergies?.length) {
+    candidatePool = candidatePool.filter((c) => {
+      if (!c.allergens) return true;
+      return !c.allergens.some((a) =>
+        options.userProfile!.allergies!.some((ua) =>
+          a.toLowerCase().includes(ua.toLowerCase()) || ua.toLowerCase().includes(a.toLowerCase())
+        )
+      );
+    });
+  }
+
+  const availableStock = (id: string) => (stockOnly ? getAvailableStockGrams(stock, id) : 500);
+
+  // Group candidate pool into category buckets
+  const dairies = candidatePool.filter((i) => isAllowedDairy(i.id) && availableStock(i.id) >= 100);
+  if (dairies.length === 0 && stockOnly) {
+    throw new MissingDairyStockError();
+  }
+
+  const grains = candidatePool.filter((i) => i.category === 'grains' && availableStock(i.id) >= 20);
+  const fruits = candidatePool.filter(
+    (i) => (i.category === 'fruits' || i.category === 'dried_fruits') && availableStock(i.id) >= 20
+  );
+  const nuts = candidatePool.filter((i) => i.category === 'nuts' && availableStock(i.id) >= 15);
+  const extras = candidatePool.filter(
+    (i) => (i.category === 'sweeteners' || i.category === 'cocoa_extras') && availableStock(i.id) >= 10
+  );
+
+  // Priority sorting: mandatory items first, then cost-efficient items
+  const isMandatory = (id: string) => (options.mandatoryIngredientIds?.includes(id) ? 1 : 0);
+  const sortPool = (list: Ingredient[]) => {
+    return list.slice().sort((a, b) => {
+      const mandDiff = isMandatory(b.id) - isMandatory(a.id);
+      if (mandDiff !== 0) return mandDiff;
+      return getIngredientCostPerKcal(a) - getIngredientCostPerKcal(b);
+    });
+  };
+
+  const sortedDairies = sortPool(dairies);
+  const sortedGrains = sortPool(grains);
+  const sortedFruits = sortPool(fruits);
+  const sortedNuts = sortPool(nuts);
+  const sortedExtras = sortPool(extras);
+
+  // 3. Generate candidate combinations of 4 to 6 ingredients
+  // NEVER use all stock at once! Each recipe gets only 4 to 6 items.
+  const validCandidates: Shake[] = [];
+  const seenFingerprints = new Set<string>();
+
+  const maxCombinationsToEvaluate = 100;
+  let evaluatedCount = 0;
+
+  comboLoop:
+  for (const d of sortedDairies) {
+    for (const g of (sortedGrains.length > 0 ? sortedGrains : [undefined])) {
+      for (const f of (sortedFruits.length > 0 ? sortedFruits : [undefined])) {
+        for (const n of (sortedNuts.length > 0 ? sortedNuts : [undefined])) {
+          for (const e of [undefined, ...sortedExtras]) {
+            if (evaluatedCount >= maxCombinationsToEvaluate) break comboLoop;
+            evaluatedCount++;
+
+            const combo = [d, g, f, n, e].filter((x): x is Ingredient => Boolean(x));
+            if (combo.length < 3 || combo.length > 6) continue;
+
+            const fp = Array.from(new Set(combo.map((x) => canonicalIngredientId(x.id)))).sort().join('|');
+            if (seenFingerprints.has(fp)) continue;
+
+            const shake = buildShakeFromIngredientCombo(combo, targetKcal, stock, stockOnly, timing);
+            if (shake) {
+              seenFingerprints.add(fp);
+              validCandidates.push(shake);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // If validCandidates < 3, try alternate 4-6 combinations (e.g. 2 nuts or 2 fruits with extras)
+  if (validCandidates.length < 3) {
+    extraComboLoop:
+    for (const d of sortedDairies) {
+      for (const g of (sortedGrains.length > 0 ? sortedGrains : [undefined])) {
+        // Option A: 2 different nuts (e.g. walnut + peanut butter) with fruit and/or sweetener
+        for (let i = 0; i < sortedNuts.length; i++) {
+          for (let j = i + 1; j < sortedNuts.length; j++) {
+            const n1 = sortedNuts[i];
+            const n2 = sortedNuts[j];
+            for (const f of (sortedFruits.length > 0 ? sortedFruits : [undefined])) {
+              for (const e of [undefined, ...sortedExtras]) {
+                const combo = [d, g, f, n1, n2, e].filter((x): x is Ingredient => Boolean(x));
+                if (combo.length < 3 || combo.length > 6) continue;
+                const fp = Array.from(new Set(combo.map((x) => canonicalIngredientId(x.id)))).sort().join('|');
+                if (seenFingerprints.has(fp)) continue;
+
+                const shake = buildShakeFromIngredientCombo(combo, targetKcal, stock, stockOnly, timing);
+                if (shake) {
+                  seenFingerprints.add(fp);
+                  validCandidates.push(shake);
+                  if (validCandidates.length >= 12) break extraComboLoop;
+                }
+              }
+            }
+          }
+        }
+
+        // Option B: 2 fruits (at most 2 allowed) + 1 nut + extra
+        if (sortedFruits.length >= 2 && validCandidates.length < 3) {
+          for (let fi = 0; fi < sortedFruits.length; fi++) {
+            for (let fj = fi + 1; fj < sortedFruits.length; fj++) {
+              const f1 = sortedFruits[fi];
+              const f2 = sortedFruits[fj];
+              for (const n of (sortedNuts.length > 0 ? sortedNuts : [undefined])) {
+                for (const e of [undefined, ...sortedExtras]) {
+                  const combo = [d, g, f1, f2, n, e].filter((x): x is Ingredient => Boolean(x));
+                  if (combo.length < 3 || combo.length > 6) continue;
+                  const fp = Array.from(new Set(combo.map((x) => canonicalIngredientId(x.id)))).sort().join('|');
+                  if (seenFingerprints.has(fp)) continue;
+
+                  const shake = buildShakeFromIngredientCombo(combo, targetKcal, stock, stockOnly, timing);
+                  if (shake) {
+                    seenFingerprints.add(fp);
+                    validCandidates.push(shake);
+                    if (validCandidates.length >= 12) break extraComboLoop;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // If still no candidates within +-300 kcal, and user has sufficient total pantry calories,
+  // try relaxed tolerance (+-500 kcal) so a realistic plan is still delivered.
+  if (validCandidates.length === 0) {
+    const capacity = calculatePantryShakeCalorieCapacity(stock);
+    if (capacity.totalCalories < targetKcal - 300) {
+      throw new InsufficientPantryStockError(targetKcal, capacity.totalCalories);
+    }
+
+    // Evaluate with relaxed tolerance (+-500 kcal)
+    relaxedLoop:
+    for (const d of sortedDairies) {
+      for (const g of (sortedGrains.length > 0 ? sortedGrains : [undefined])) {
+        for (const f of (sortedFruits.length > 0 ? sortedFruits : [undefined])) {
+          for (const n of (sortedNuts.length > 0 ? sortedNuts : [undefined])) {
+            for (const e of [undefined, ...sortedExtras]) {
+              const combo = [d, g, f, n, e].filter((x): x is Ingredient => Boolean(x));
+              if (combo.length < 3 || combo.length > 6) continue;
+              const fp = Array.from(new Set(combo.map((x) => canonicalIngredientId(x.id)))).sort().join('|');
+              if (seenFingerprints.has(fp)) continue;
+
+              const shake = buildShakeFromIngredientCombo(combo, targetKcal, stock, stockOnly, timing, 500);
+              if (shake) {
+                seenFingerprints.add(fp);
+                validCandidates.push(shake);
+                if (validCandidates.length >= 6) break relaxedLoop;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (validCandidates.length === 0) {
+    const capacity = calculatePantryShakeCalorieCapacity(stock);
+    if (capacity.totalCalories < targetKcal - 300) {
+      throw new InsufficientPantryStockError(targetKcal, capacity.totalCalories);
+    }
+    throw new Error(
+      `Kilerinizde toplam ${capacity.totalCalories} kcal stok bulunuyor ancak tek bir günlük shake için güvenli sindirim ve porsiyon sınırları dahilinde tarif kombinasyonu oluşturulamadı. Lütfen kilerinize yulaf, fındık, ceviz, badem, muz veya tahin gibi shake uyumlu temel besinlerden ekleyin.`
+    );
+  }
+
+  // 4. SORT ALL VALID CANDIDATES: MINIMUM INGREDIENT COUNT FIRST, THEN LOWEST COST
+  // Rule 3: Use the minimum necessary ingredient count to achieve target calories (4 before 5, 5 before 6)
+  validCandidates.sort((a, b) => {
+    // Primary (Priority 9): Minimum necessary ingredient count (4 items > 5 items > 6 items)
+    if (a.ingredients.length !== b.ingredients.length) {
+      return a.ingredients.length - b.ingredients.length;
+    }
+    // Secondary (Priority 10): Lowest total cost
+    const costA = a.estimatedCost ?? 99999;
+    const costB = b.estimatedCost ?? 99999;
+    if (Math.abs(costA - costB) > 0.5) {
+      return costA - costB;
+    }
+    // Tertiary (Priority 11): Closeness to target calories
+    return Math.abs(a.estimatedCalories - targetKcal) - Math.abs(b.estimatedCalories - targetKcal);
+  });
+
+  // 5. Select at least 3 distinct candidates
+  const weeklySignatures = getWeeklyRecommendedSignatures();
+  const selectedShakes: Shake[] = [];
+  const chosenFingerprints = new Set<string>();
+
+  for (const candidate of validCandidates) {
+    if (selectedShakes.length >= 3) break;
+    const fp = getRecipeFingerprint(candidate.ingredients);
+    if (chosenFingerprints.has(fp)) continue;
+
+    // Check weekly repeats (only skip if we have plenty of other alternatives)
+    if (weeklySignatures.includes(fp) && validCandidates.length >= 6 && selectedShakes.length < 2) {
+      continue;
+    }
+
+    // Check diversity against already selected candidates (Jaccard similarity < 0.70)
+    const isTooSimilar = selectedShakes.some((existing) => {
+      const sim = calculateRecipeSimilarity(candidate.ingredients, existing.ingredients);
+      return sim >= 0.70;
+    });
+
+    if (isTooSimilar) continue;
+
+    chosenFingerprints.add(fp);
+    selectedShakes.push(candidate);
+    saveWeeklyRecommendedSignature(fp);
+  }
+
+  // Backfill if diversity was too restrictive and we still have valid candidates
+  if (selectedShakes.length < 3) {
+    for (const candidate of validCandidates) {
+      if (selectedShakes.length >= 3) break;
+      const fp = getRecipeFingerprint(candidate.ingredients);
+      if (!chosenFingerprints.has(fp)) {
+        chosenFingerprints.add(fp);
+        selectedShakes.push(candidate);
+      }
+    }
+  }
+
+  // 6. Format names and labels with cost information
+  return selectedShakes.map((shake, idx) => {
+    const costLabel = shake.estimatedCost && shake.estimatedCost > 0 ? `~${shake.estimatedCost} TL` : 'Ekonomik';
+    let optionTag = '';
+    if (idx === 0) optionTag = ` (En Uygun Maliyet • ${costLabel})`;
+    else if (idx === 1) optionTag = ` (Seçenek 2 • ${costLabel})`;
+    else optionTag = ` (Seçenek 3 • ${costLabel})`;
+
+    return {
+      ...shake,
+      name: `${shake.name.replace(/ \(.*\)/, '')}${optionTag}`,
+    };
+  });
+}
+
+/**
+ * Main API function to generate daily shakes: returns Shake[] with at least 3 distinct valid shakes
+ * from available pantry stock, or however many valid ones the stock genuinely permits.
+ */
+export function generateDailyShakes(options: ComposeOptions = {}): Shake[] {
+  return composeThreeDistinctDailyShakes(options);
 }

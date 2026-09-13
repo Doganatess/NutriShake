@@ -5,7 +5,7 @@ import {
   Shake,
   ShoppingItem,
 } from '../types';
-import { INGREDIENT_MAP } from '../data/ingredients';
+import { INGREDIENT_MAP, canonicalIngredientId } from '../data/ingredients';
 import { normalizeToGramsOrMl, formatNormalizedUnit } from '../utils/unitConverter';
 import {
   getStoredStock,
@@ -15,21 +15,143 @@ import {
 } from '../storage/storageAbstraction';
 
 /**
- * Gets a user's stock item by ingredient ID.
+ * Gets a user's stock item by ingredient ID, checking canonical aliases.
  */
-export function getStockItem(ingredientId: string): StockItem | null {
-  const stock = getStoredStock();
-  return stock[ingredientId] || null;
+export function getStockItem(ingredientId: string, customStock?: Record<string, any>): StockItem | null {
+  const stock = customStock || getStoredStock();
+  if (!stock) return null;
+  if (stock[ingredientId]) return stock[ingredientId];
+  const canonical = canonicalIngredientId(ingredientId);
+  if (stock[canonical]) return stock[canonical];
+  for (const [key, item] of Object.entries(stock)) {
+    if (canonicalIngredientId(key) === canonical) return item as StockItem;
+  }
+  return null;
+}
+
+/**
+ * Returns available stock quantity in normalized grams/ml for an ingredient ID.
+ * Returns 0 if item is not in stock or stock <= 0.
+ */
+export function getAvailableStockGrams(
+  stock: Record<string, any> | undefined | null,
+  ingredientId: string
+): number {
+  if (!stock || !ingredientId) return 0;
+  const canonical = canonicalIngredientId(ingredientId);
+
+  // 1. Direct canonical lookup
+  if (stock[canonical]) {
+    const item = stock[canonical];
+    const val = item.normalizedGramsOrMl !== undefined ? item.normalizedGramsOrMl : item.amount;
+    if (typeof val === 'number' && val > 0) return val;
+  }
+
+  // 2. Direct ingredientId lookup
+  if (stock[ingredientId]) {
+    const item = stock[ingredientId];
+    const val = item.normalizedGramsOrMl !== undefined ? item.normalizedGramsOrMl : item.amount;
+    if (typeof val === 'number' && val > 0) return val;
+  }
+
+  // 3. Scan all stock entries by canonical match
+  for (const [key, item] of Object.entries(stock)) {
+    if (canonicalIngredientId(key) === canonical) {
+      const val = (item as any)?.normalizedGramsOrMl !== undefined ? (item as any).normalizedGramsOrMl : (item as any)?.amount;
+      if (typeof val === 'number' && val > 0) return val;
+    }
+  }
+
+  return 0;
+}
+
+/**
+ * Calculates total calorie capacity of all shake-compatible items currently in user stock.
+ */
+export function calculatePantryShakeCalorieCapacity(customStock?: Record<string, any>): {
+  totalCalories: number;
+  dailyUsableCalories: number;
+  availableIngredientsCount: number;
+  hasAllowedDairy: boolean;
+  dairyCalories: number;
+  details: { ingredientId: string; name: string; amount: number; calories: number; usableAmount: number; usableCalories: number }[];
+} {
+  const stock = customStock || getStoredStock();
+  const ALLOWED_DAIRY = ['dairy_whole_milk', 'dairy_semi_skimmed_milk', 'dairy_village_yogurt', 'dairy_strained_yogurt'];
+  let totalCalories = 0;
+  let dailyUsableCalories = 0;
+  let dairyCalories = 0;
+  let hasAllowedDairy = false;
+  const details: { ingredientId: string; name: string; amount: number; calories: number; usableAmount: number; usableCalories: number }[] = [];
+
+  // Realistic upper bounds for a single day's shake recipe (split in 2 portions):
+  const DAILY_MAX_PORTION_BY_CATEGORY: Record<string, number> = {
+    dairy: 700, // max 700ml milk/yogurt
+    grains: 350, // max 350g oats
+    nuts: 300, // max 300g nuts/spreads total
+    fruits: 350, // max 350g fruit total
+    dried_fruits: 180, // max 180g dried fruit total
+    sweeteners: 120, // max 120g honey/pekmez total
+    cocoa_extras: 40, // max 40g cocoa/cacao total
+  };
+
+  for (const [id, item] of Object.entries(stock || {})) {
+    const canonicalId = canonicalIngredientId(id);
+    const ing = INGREDIENT_MAP[canonicalId] || INGREDIENT_MAP[id];
+    const grams = (item as any)?.normalizedGramsOrMl !== undefined ? (item as any).normalizedGramsOrMl : (item as any)?.amount || 0;
+    if (grams <= 0 || !ing) continue;
+
+    // Filter out kefir, supplements, or non-shake items
+    if (
+      canonicalId.toLowerCase().includes('kefir') ||
+      canonicalId.toLowerCase().includes('protein') ||
+      canonicalId.toLowerCase().includes('supplement') ||
+      canonicalId.toLowerCase().includes('whey')
+    ) {
+      continue;
+    }
+
+    const cals = Math.round((grams * (ing.caloriesPer100g || 0)) / 100);
+    totalCalories += cals;
+
+    // Calculate daily usable calories based on realistic single-day maximums
+    const maxSingleIngDaily = DAILY_MAX_PORTION_BY_CATEGORY[ing.category] || 150;
+    const usableGrams = Math.min(grams, maxSingleIngDaily);
+    const usableCals = Math.round((usableGrams * (ing.caloriesPer100g || 0)) / 100);
+    dailyUsableCalories += usableCals;
+
+    if (ALLOWED_DAIRY.includes(canonicalId)) {
+      hasAllowedDairy = true;
+      dairyCalories += cals;
+    }
+
+    details.push({
+      ingredientId: canonicalId,
+      name: ing.name,
+      amount: grams,
+      calories: cals,
+      usableAmount: usableGrams,
+      usableCalories: usableCals,
+    });
+  }
+
+  return {
+    totalCalories,
+    dailyUsableCalories,
+    availableIngredientsCount: details.length,
+    hasAllowedDairy,
+    dairyCalories,
+    details,
+  };
 }
 
 /**
  * Gets user's available stock amount converted into normalized grams or ml.
  * If user does not have this ingredient in stock, returns 0.
  */
-export function getStockAmountNormalized(ingredientId: string): number {
-  const item = getStockItem(ingredientId);
-  if (!item || item.amount <= 0) return 0;
-  return item.normalizedGramsOrMl || 0;
+export function getStockAmountNormalized(ingredientId: string, customStock?: Record<string, any>): number {
+  const stock = customStock || getStoredStock();
+  return getAvailableStockGrams(stock, ingredientId);
 }
 
 /**
@@ -37,19 +159,21 @@ export function getStockAmountNormalized(ingredientId: string): number {
  */
 export function hasSufficientStock(
   ingredientId: string,
-  requiredAmountNormalized: number
+  requiredAmountNormalized: number,
+  customStock?: Record<string, any>
 ): boolean {
   if (requiredAmountNormalized <= 0) return true;
-  const available = getStockAmountNormalized(ingredientId);
+  const available = getStockAmountNormalized(ingredientId, customStock);
   return available >= requiredAmountNormalized;
 }
 
 /**
  * Validates whether all ingredients in a recipe can be fulfilled by current user stock.
- * Rule: Stok hiçbir zaman negatif olamaz. Tarifin ihtiyacı stoktan fazla ise tarif geçersizdir.
+ * Rule: Stok hiçbir zaman negatif olamaz. availableStock <= 0 veya amount > availableStock ise tarif KESİNLİKLE GEÇERSİZDİR.
  */
 export function validateRecipeStock(
-  ingredients: { ingredientId: string; amount: number }[]
+  ingredients: { ingredientId: string; amount: number }[],
+  customStock?: Record<string, any>
 ): {
   isValid: boolean;
   missing: {
@@ -70,17 +194,22 @@ export function validateRecipeStock(
     retailDisplayDeficit: string;
   }[] = [];
 
+  const stock = customStock || getStoredStock();
+
   for (const item of ingredients) {
-    const available = getStockAmountNormalized(item.ingredientId);
-    if (available < item.amount) {
-      const deficit = item.amount - available;
-      const ing = INGREDIENT_MAP[item.ingredientId];
+    const available = getAvailableStockGrams(stock, item.ingredientId);
+    const needed = item.amount || 0;
+
+    if (available <= 0 || available < needed) {
+      const deficit = available <= 0 ? needed : needed - available;
+      const canonId = canonicalIngredientId(item.ingredientId);
+      const ing = INGREDIENT_MAP[canonId] || INGREDIENT_MAP[item.ingredientId];
       const formatted = formatNormalizedUnit(deficit, ing);
 
       missing.push({
         ingredientId: item.ingredientId,
         ingredientName: ing?.name || item.ingredientId,
-        requiredNormalized: item.amount,
+        requiredNormalized: needed,
         availableNormalized: available,
         deficitNormalized: deficit,
         retailDisplayDeficit: formatted.display,
@@ -181,12 +310,30 @@ export function setExactStock(
 
 /**
  * Removes an ingredient from stock completely.
+ * Removes both raw and canonical key matches to guarantee stock <= 0.
  */
 export function removeStockItem(ingredientId: string): void {
+  if (!ingredientId) return;
   const stock = getStoredStock();
-  if (stock[ingredientId]) {
-    delete stock[ingredientId];
-    saveStoredStock(stock);
+  const canonId = canonicalIngredientId(ingredientId);
+
+  delete stock[ingredientId];
+  delete stock[canonId];
+
+  for (const key of Object.keys(stock)) {
+    if (key === ingredientId || key === canonId || canonicalIngredientId(key) === canonId) {
+      delete stock[key];
+    }
+  }
+
+  saveStoredStock(stock);
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('nutrishake-stock-changed', {
+        detail: { deletedId: ingredientId, canonicalId: canonId },
+      })
+    );
   }
 }
 

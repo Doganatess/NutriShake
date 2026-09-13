@@ -6,6 +6,17 @@ export default async function handler(req: Request, res: Response) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  let body = req.body;
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body);
+    } catch {
+      body = {};
+    }
+  } else if (!body) {
+    body = {};
+  }
+
   const {
     targetKcal,
     currentShakeName,
@@ -16,7 +27,7 @@ export default async function handler(req: Request, res: Response) {
     otherShakesNames,
     userPreferences,
     dislikedShakeNames,
-  } = req.body;
+  } = body;
 
   try {
     const newShake = await replaceSingleShake({

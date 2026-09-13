@@ -139,6 +139,7 @@ app.post('/api/generate-plan', async (req, res) => {
     userPreferences,
     dislikedShakeNames,
     favoriteShakeNames,
+    userStock,
     requestId,
   } = req.body;
 
@@ -159,6 +160,7 @@ app.post('/api/generate-plan', async (req, res) => {
         userPreferences: Array.isArray(userPreferences) ? userPreferences : [],
         dislikedShakeNames: Array.isArray(dislikedShakeNames) ? dislikedShakeNames : [],
         favoriteShakeNames: Array.isArray(favoriteShakeNames) ? favoriteShakeNames : [],
+        userStock: userStock && typeof userStock === 'object' ? userStock : undefined,
       });
     });
     res.json(plan);
@@ -184,6 +186,7 @@ app.post('/api/replace-shake', async (req, res) => {
     otherShakesNames,
     userPreferences,
     dislikedShakeNames,
+    userStock,
     requestId,
   } = req.body;
 
@@ -201,6 +204,7 @@ app.post('/api/replace-shake', async (req, res) => {
         otherShakesNames: Array.isArray(otherShakesNames) ? otherShakesNames : [],
         userPreferences: Array.isArray(userPreferences) ? userPreferences : [],
         dislikedShakeNames: Array.isArray(dislikedShakeNames) ? dislikedShakeNames : [],
+        userStock: userStock && typeof userStock === 'object' ? userStock : undefined,
       });
     });
     res.json(newShake);

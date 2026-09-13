@@ -6,7 +6,18 @@ export default async function handler(req: Request, res: Response) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { imageBase64, mimeType, mealName, userNotes } = req.body;
+  let body = req.body;
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body);
+    } catch {
+      body = {};
+    }
+  } else if (!body) {
+    body = {};
+  }
+
+  const { imageBase64, mimeType, mealName, userNotes } = body;
 
   if (!imageBase64) {
     return res.status(400).json({ error: 'Görsel verisi eksik.' });

@@ -35,15 +35,15 @@ export const RecipeBuilder: React.FC<RecipeBuilderProps> = ({
 }) => {
   // Selected ingredients
   const [selectedIngredientIds, setSelectedIngredientIds] = useState<string[]>([
-    'banana',
-    'milk_whole',
-    'oats_fine',
-    'grape_molasses',
+    'fruit_banana',
+    'dairy_whole_milk',
+    'grain_oats',
+    'molasses_grape',
   ]);
 
   // Current recipe ingredients with gram amounts
   const [recipeItems, setRecipeItems] = useState<ShakeIngredient[]>(() =>
-    buildInitialRecipe(['banana', 'milk_whole', 'oats_fine', 'grape_molasses'], portionPreference)
+    buildInitialRecipe(['fruit_banana', 'dairy_whole_milk', 'grain_oats', 'molasses_grape'], portionPreference)
   );
 
   const [recipeName, setRecipeName] = useState<string>('Özel Ev Yapımı Shake');

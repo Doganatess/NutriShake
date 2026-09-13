@@ -7,6 +7,7 @@ import {
   validateRecipeStock,
   calculatePantryShakeCalorieCapacity,
 } from '../engines/stockEngine';
+import { CALORIE_TOLERANCE_KCAL } from '../constants/calorieTargets';
 
 export interface RecipeValidationOptions {
   forbiddenIngredientIds?: string[];
@@ -131,13 +132,18 @@ export function validateMasterRecipe(
 
   const ingredients = shake.ingredients || [];
 
-  // 1. Calorie Delta: abs(shakeTotalKcal - targetKcal) <= 300
+  // 1. Calorie Delta: informational only — a calorie deviation from target must NEVER
+  // block validity. Per product decision, when pantry stock can't reach the exact
+  // target, the closest achievable recipe is still accepted silently (no error,
+  // no user-facing warning). Only genuine rule violations below (dairy, kefir,
+  // fruit count, duplicates, stock absence, etc.) can set isValid to false.
   if (options.targetKcal && options.targetKcal > 0) {
     const delta = Math.abs(shake.estimatedCalories - options.targetKcal);
-    if (delta > 300) {
-      rulesPassed.rule1_calorieDelta = false;
-      errors.push(
-        `Kural 1 İhlali (Kalori Toleransı): Shake toplamı (${shake.estimatedCalories} kcal), günlük hedef olan ${options.targetKcal} kcal değerinden ${delta} kcal saptı (Kabul edilen aralık: ${options.targetKcal - 300} - ${options.targetKcal + 300} kcal).`
+    if (delta > CALORIE_TOLERANCE_KCAL) {
+      // Intentionally NOT pushed to `errors` and NOT flipping rulesPassed.rule1_calorieDelta.
+      // Kept as a silent warning only (never surfaced to the user) for debugging/telemetry.
+      warnings.push(
+        `Bilgi: Shake toplamı (${shake.estimatedCalories} kcal) hedeften (${options.targetKcal} kcal) ${delta} kcal saptı; stok sınırları dahilinde en yakın tarif kabul edildi.`
       );
     }
   }
@@ -528,12 +534,15 @@ export function validateAndSanitizeShake(
         );
         if (itemIdx !== -1) {
           const avail = missingItem.availableNormalized;
+          // FIX: previously only clamped down to available stock when avail >= 5g/ml,
+          // leaving smaller (or zero) shortfalls to fall through to a hard error below.
+          // Now: clamp whenever there's a usable amount, and drop the ingredient
+          // entirely (rather than erroring) when stock is essentially exhausted (0).
           if (avail >= 5) {
-            warnings.push(
-              `"${missingItem.ingredientName}" miktarı kiler stoğuna göre ${workingIngredients[itemIdx].amount}g/ml'den ${avail}g/ml'ye otomatik küçültüldü.`
-            );
             workingIngredients[itemIdx].amount = avail;
             workingIngredients[itemIdx].quantity = avail;
+          } else {
+            workingIngredients.splice(itemIdx, 1);
           }
         }
       }
@@ -541,12 +550,15 @@ export function validateAndSanitizeShake(
       stockValidation = validateRecipeStock(workingIngredients, stock);
     }
 
-    // b) Hâlâ yetersizse errors dizisine gerçek ve DOĞRU bir mesaj ekle
+    // b) Hâlâ yetersizse — bu artık BLOK EDEN bir hata değil, sadece sessiz bilgi notu.
+    // Per product decision (Seçenek 2): stok yetersizliği asla kullanıcıya gösterilen
+    // bir uyarı ya da hata üretmemeli; kilerdeki mevcut miktarlarla en yakın geçerli
+    // tarif sessizce kabul edilir.
     if (!stockValidation.isValid) {
       const pantryCap = calculatePantryShakeCalorieCapacity(stock);
       for (const missingItem of stockValidation.missing) {
-        errors.push(
-          `Kural 3 İhlali (Yetersiz Stok): "${missingItem.ingredientName}" için ${missingItem.requiredNormalized}g gerekiyor ancak kilerde yalnızca ${missingItem.availableNormalized}g var (Kilerdeki gerçek toplam stok kapasitesi: ${pantryCap.totalCalories} kcal).`
+        warnings.push(
+          `Bilgi: "${missingItem.ingredientName}" için ${missingItem.requiredNormalized}g gerekiyordu, kilerde ${missingItem.availableNormalized}g vardı (Kilerdeki toplam kapasite: ${pantryCap.totalCalories} kcal). Mevcut stokla en yakın tarif kabul edildi.`
         );
       }
     }

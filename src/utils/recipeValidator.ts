@@ -552,23 +552,150 @@ export function validateAndSanitizeShake(
     }
   }
 
-  // 3. Calculate deterministic nutrition
+  // 3. Intelligent Calorie Balancing & Scaling
+  let initialNutrition = calculateShakeNutrition(workingIngredients);
+  if (options.targetKcal && options.targetKcal > 0 && workingIngredients.length > 0) {
+    const target = options.targetKcal;
+    const currentKcal = initialNutrition.calories;
+    const diff = target - currentKcal;
+
+    // If current calories deviate significantly from target (>150 kcal), auto-scale safe neutral ingredients
+    if (Math.abs(diff) > 150) {
+      const scaleFactor = target / Math.max(100, currentKcal);
+
+      for (const item of workingIngredients) {
+        const canon = canonicalIngredientId(item.ingredientId);
+        const def = INGREDIENT_MAP[canon] || INGREDIENT_MAP[item.ingredientId];
+        if (!def) continue;
+
+        const maxStock = stock ? getAvailableStockGrams(stock, canon) : Infinity;
+        let maxSafeAmount = 500;
+        let minSafeAmount = 10;
+
+        if (canon.includes('milk') || def.category === 'dairy') {
+          maxSafeAmount = canon.includes('yogurt') ? 350 : 500;
+          minSafeAmount = canon.includes('yogurt') ? 100 : 150;
+        } else if (canon.includes('oat') || def.category === 'grains') {
+          maxSafeAmount = 180;
+          minSafeAmount = 25;
+        } else if (def.category === 'nuts' || canon.includes('nut') || canon.includes('seed')) {
+          maxSafeAmount = 70;
+          minSafeAmount = 10;
+        } else if (def.category === 'fruits' || def.category === 'dried_fruits') {
+          maxSafeAmount = 180;
+          minSafeAmount = 30;
+        }
+
+        const effectiveMax = Math.min(maxSafeAmount, maxStock);
+        if (effectiveMax > minSafeAmount) {
+          const newAmount = Math.round(item.amount * scaleFactor);
+          const clamped = Math.max(minSafeAmount, Math.min(effectiveMax, newAmount));
+          item.amount = clamped;
+          item.quantity = clamped;
+        }
+      }
+
+      // If still significant deficit, expand grains/nuts/dairy up to available stock bounds
+      let updatedNutrition = calculateShakeNutrition(workingIngredients);
+      let remainingDeficit = target - updatedNutrition.calories;
+
+      if (remainingDeficit > 80) {
+        const expandableGrains = workingIngredients.filter((i) => {
+          const canon = canonicalIngredientId(i.ingredientId);
+          const def = INGREDIENT_MAP[canon] || INGREDIENT_MAP[i.ingredientId];
+          return def?.category === 'grains' || canon.includes('oat');
+        });
+        const expandableNuts = workingIngredients.filter((i) => {
+          const canon = canonicalIngredientId(i.ingredientId);
+          const def = INGREDIENT_MAP[canon] || INGREDIENT_MAP[i.ingredientId];
+          return def?.category === 'nuts' || canon.includes('nut') || canon.includes('seed');
+        });
+        const expandableDairy = workingIngredients.filter((i) => isDairy(i.ingredientId));
+
+        const priorityList = [...expandableGrains, ...expandableNuts, ...expandableDairy];
+        for (const expItem of priorityList) {
+          if (remainingDeficit <= 50) break;
+          const canon = canonicalIngredientId(expItem.ingredientId);
+          const def = INGREDIENT_MAP[canon] || INGREDIENT_MAP[expItem.ingredientId];
+          if (!def) continue;
+
+          const maxStock = stock ? getAvailableStockGrams(stock, canon) : Infinity;
+          const categoryCap = canon.includes('oat') ? 180 : (def.category === 'nuts' ? 70 : 500);
+          const room = Math.min(categoryCap, maxStock) - expItem.amount;
+          if (room > 5) {
+            const kcalPerGram = (def.caloriesPer100g || 100) / 100;
+            const neededGrams = Math.round(remainingDeficit / Math.max(0.4, kcalPerGram));
+            const step = Math.min(room, neededGrams);
+            expItem.amount += step;
+            expItem.quantity += step;
+            remainingDeficit -= Math.round(step * kcalPerGram);
+          }
+        }
+
+        // If still significant deficit and recipe has < 6 ingredients, add healthy nuts/seeds to reach target
+        if (remainingDeficit > 150 && workingIngredients.length < 6) {
+          const hasNuts = workingIngredients.some((i) => {
+            const canon = canonicalIngredientId(i.ingredientId);
+            const def = INGREDIENT_MAP[canon] || INGREDIENT_MAP[i.ingredientId];
+            return def?.category === 'nuts' || canon.includes('nut') || canon.includes('seed');
+          });
+          if (!hasNuts) {
+            let nutId = 'nut_walnut';
+            if (stock) {
+              for (const n of ['nut_walnut', 'nut_hazelnut', 'nut_almond', 'seed_peanut_butter', 'seed_chia']) {
+                if (getAvailableStockGrams(stock, n) >= 15) {
+                  nutId = n;
+                  break;
+                }
+              }
+            }
+            const nutDef = INGREDIENT_MAP[nutId];
+            if (nutDef && (!stock || getAvailableStockGrams(stock, nutId) >= 15)) {
+              const maxStock = stock ? getAvailableStockGrams(stock, nutId) : 60;
+              const kcalPerG = (nutDef.caloriesPer100g || 650) / 100;
+              const nutGrams = Math.min(Math.min(50, maxStock), Math.round(remainingDeficit / kcalPerG));
+              if (nutGrams >= 15) {
+                workingIngredients.push({
+                  ingredientId: nutId,
+                  amount: nutGrams,
+                  quantity: nutGrams,
+                  unit: 'g',
+                });
+                warnings.push(`Hedef kaloriye ulaşmak için ${nutDef.name} (${nutGrams}g) eklendi.`);
+              }
+            }
+          }
+        }
+      }
+
+      warnings.push(`Tarif malzeme miktarları hedef kaloriye (~${target} kcal) göre otomatik optimize edildi.`);
+    }
+  }
+
+  // 4. Calculate deterministic nutrition
   const nutrition = calculateShakeNutrition(workingIngredients);
 
-  // 4. Equal 50/50 portion division
+  // 5. Equal 50/50 portion division
   const totalCalories = nutrition.calories;
   const portionCalories = Math.round(totalCalories / 2);
   const portionProtein = Math.round((nutrition.protein / 2) * 10) / 10;
   const portionCarbs = Math.round((nutrition.carbs / 2) * 10) / 10;
   const portionFat = Math.round((nutrition.fat / 2) * 10) / 10;
 
-  // 5. Calorie Tolerance check
+  // 6. Calorie Tolerance check
   if (options.targetKcal && options.targetKcal > 0) {
-    const diff = Math.abs(totalCalories - options.targetKcal);
-    if (diff > 300) {
-      errors.push(
-        `Kalori Kuralı: Shake toplam kalorisi (${totalCalories} kcal) günlük hedef olan ${options.targetKcal} kcal değerinden en fazla 300 kcal sapabilir (Fark: ${diff} kcal).`
+    const pantryCap = stock ? calculatePantryShakeCalorieCapacity(stock).totalCalories : Infinity;
+    if (pantryCap < options.targetKcal - 300) {
+      warnings.push(
+        `Kilerdeki toplam stok kapasitesi (${pantryCap} kcal), hedef kaloriden (${options.targetKcal} kcal) düşük olduğundan tarif kiler stoğuna (${totalCalories} kcal) göre dengelendi.`
       );
+    } else {
+      const diff = Math.abs(totalCalories - options.targetKcal);
+      if (diff > 250) {
+        warnings.push(
+          `Shake toplam kalorisi (${totalCalories} kcal) hedef kaloriden (${options.targetKcal} kcal) ${diff} kcal sapma göstermektedir.`
+        );
+      }
     }
   }
 

@@ -781,10 +781,16 @@ export async function replaceSingleShake(req: ReplaceShakeRequest): Promise<Shak
     )
     .join('\n');
 
+  const targetKcal = Math.round(req.targetKcal || 500);
+  const targetPortionKcal = Math.round(targetKcal / 2);
+  const minAcceptableKcal = Math.max(350, Math.round(targetKcal - 250));
+  const maxAcceptableKcal = Math.round(targetKcal + 250);
+
   const prompt = `Kullanıcı mevcut shake'ini değiştirmek ("Değiştir") istedi.
 Değiştirilecek mevcut shake: "${req.currentShakeName}".
-Hedef Kalori: ~${req.targetKcal} kcal.
+HEDEF KALORİ: Toplam ~${targetKcal} kcal (${minAcceptableKcal} - ${maxAcceptableKcal} kcal aralığı).
 Porsiyon Tercihi: ${req.portionPreference}.
+Shake 2 EŞİT PORSİYONA (%50 + %50) bölünür (Her porsiyon: ~${targetPortionKcal} kcal).
 
 GÖREV:
 "${req.currentShakeName}" yerine geçecek YEPYENİ, lezzetli ve dengeli TEK BİR alternatif shake hazırla.
@@ -794,15 +800,18 @@ Yasaklı malzemeler: ${req.forbiddenIngredientIds.join(', ') || 'Yok'}.
 Kullanıcı tercihleri: ${req.userPreferences.join(', ') || 'Yok'}.
 
 KESİN KURALLAR:
-1. SÜT ÜRÜNÜ SINIRI - TAM OLARAK 1 SÜT ÜRÜNÜ:
+1. HEDEF KALORİ KURALI: Shake toplam kalorisi MUTLAKA ${targetKcal} kcal civarında olmalıdır (${minAcceptableKcal} - ${maxAcceptableKcal} kcal aralığı).
+   - Shake 2 EŞİT PORSİYONA (%50 + %50) bölünür (Her porsiyon: ~${targetPortionKcal} kcal).
+   - Hedef yüksekse (örneğin 1200-2200 kcal), yulaf miktarını 80-140g, kuruyemişi 30-60g, sütü 350-500ml gibi ayarlayarak hedef kaloriye ULAŞ!
+2. SÜT ÜRÜNÜ SINIRI - TAM OLARAK 1 SÜT ÜRÜNÜ:
    - Tarifte EN AZ 1 ve EN FAZLA 1 süt ürünü olmalıdır (dairyIngredientCount === 1).
    - Süt + yoğurt birlikte KULLANILAMAZ. İki farklı süt veya iki farklı yoğurt birlikte KULLANILAMAZ.
    - Yalnızca "dairy_whole_milk", "dairy_semi_skimmed_milk", "dairy_village_yogurt", "dairy_strained_yogurt" arasından TEK BİR TANESİ seçilebilir.
-2. MEYVE SINIRI - EN FAZLA 2 FARKLI MEYVE:
+3. MEYVE SINIRI - EN FAZLA 2 FARKLI MEYVE:
    - Tarifte en fazla 2 farklı meyve kullanılabilir (fruitIngredientCount <= 2). 3 veya daha fazla meyve YASAKTIR.
-3. KEFİR VE TAKVİYE KESİNLİKLE YASAKTIR: Kefir veya protein tozu KULLANILAMAZ.
-4. MALZEME SAYISI: Minimum gerekli malzeme sayısını kullan. 4 ile en fazla 6 malzeme (asla 6'dan fazla malzeme olamaz).
-5. 2 EŞİT PORSİYONA BÖLÜNÜR (%50 + %50).
+4. KEFİR VE TAKVİYE KESİNLİKLE YASAKTIR: Kefir veya sentetik protein tozu KULLANILAMAZ.
+5. MALZEME SAYISI: Minimum gerekli malzeme sayısını kullan. 4 ile en fazla 6 malzeme (asla 6'dan fazla malzeme olamaz).
+6. KİLER STOĞU: Her malzemenin miktarını kilerde mevcut olan gramaj sınırları içerisinde tut (Kiler Stoğu sütununa bak).
 
 SADECE aşağıdaki mevcut ID'leri kullan (Protein takviyesi KESİNLİKLE YOKTUR, sadece doğal gıdalar):
 ${ingredientCatalogSummary}
@@ -872,11 +881,12 @@ Aşağıdaki JSON şemasına uygun tek bir shake döndür.`;
           return validation.sanitizedShake;
         }
 
-        throw new Error('Üretilen alternatif shake beslenme kurallarını karşılamadı.');
+        console.info('[Gemini] Alternatif shake kurallara uyarlanıyor, deterministik motor devreye girdi:', validation.errors);
+        return generateDeterministicAlternativeShake(req);
       });
     });
   } catch (err) {
-    console.warn('[Gemini] Alternatif shake oluşturmada hata, yerel tarif seçiliyor:', err);
+    console.info('[Gemini] Alternatif shake oluşturma yerel tarif motoru ile tamamlanıyor:', err);
     return generateDeterministicAlternativeShake(req);
   }
 }

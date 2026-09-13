@@ -30,8 +30,8 @@ import { deductRecipeStock, consumeStockForPortion, revertStockForPortion } from
 import { composeDeterministicShake, hasDairyInStock } from '../engines/recipeCompositionEngine';
 import { getStoredStock } from '../storage/storageAbstraction';
 import { calculateOptimalDailyShakeKcal } from '../engines/planningEngine';
-import { calculateShakeNutrition } from '../engines/nutritionEngine';
-import { validateShakeRecipe } from '../engines/recipeValidator';
+import { calculateShakeNutrition } from '../utils/nutritionEngine';
+import { validateMasterRecipe } from '../utils/recipeValidator';
 
 interface PlanViewProps {
   profile: UserProfile;
@@ -357,8 +357,15 @@ export const PlanView: React.FC<PlanViewProps> = ({
       newShake.portion2Completed = false;
       newShake.isCompleted = false;
 
-      // Validate recipe against stock and dairy rules
-      validateShakeRecipe(newShake.ingredients, profile, { checkStock: false });
+      // Validate recipe against all 12 master rules (dairy, kefir, fruit limit, duplicates, etc.)
+      // The result is now actually checked — an invalid replacement is rejected instead of silently accepted.
+      const validation = validateMasterRecipe(newShake, {
+        targetKcal,
+        userStock: stock,
+      });
+      if (!validation.isValid) {
+        throw new Error(validation.errors[0] || 'Yeni tarif geçerlilik kurallarını sağlamadı.');
+      }
 
       const updatedShakes = plan.shakes.map((s) => (s.id === shake.id ? newShake : s));
 

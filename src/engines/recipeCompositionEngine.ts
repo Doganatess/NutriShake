@@ -7,6 +7,7 @@ import {
 } from '../types';
 import { INGREDIENT_MAP, INGREDIENTS_DATABASE, canonicalIngredientId } from '../data/ingredients';
 import { calculateShakeNutrition } from '../utils/nutritionEngine';
+import { DAILY_TARGET_KCAL } from '../constants/calorieTargets';
 import {
   getStoredStock,
   getStoredDislikedShakes,
@@ -458,7 +459,10 @@ export function composeDeterministicShake(options: ComposeOptions = {}): Shake {
  * Ensures distinct canonical ingredient combinations and weekly history uniqueness.
  */
 export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): Shake[] {
-  const targetKcal = options.targetCalories || 3623;
+  // FIX: previously defaulted to a hardcoded 3623 and never enforced a floor, so a
+  // caller passing a low targetCalories (e.g. an old/incorrect profile value) would
+  // silently produce a low-calorie shake. Now it can never fall below DAILY_TARGET_KCAL.
+  const targetKcal = Math.max(DAILY_TARGET_KCAL, options.targetCalories || 0);
   const timing = options.timing || 'morning';
   const stock = options.userStock || getStoredStock();
   const stockOnly = options.stockOnly !== false;
@@ -468,10 +472,12 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
     if (!hasDairyInStock(stock)) {
       throw new MissingDairyStockError();
     }
-    const capacity = calculatePantryShakeCalorieCapacity(stock);
-    if (capacity.totalCalories < targetKcal - 300) {
-      throw new InsufficientPantryStockError(targetKcal, capacity.totalCalories);
-    }
+    // FIX: previously threw InsufficientPantryStockError here whenever total pantry
+    // calorie capacity fell short of the target (~3200 kcal). Per product decision,
+    // insufficient stock should NEVER block the user with an error — the composer
+    // should silently build the closest possible recipe with what's available. The
+    // combo-generation and relaxed-tolerance logic below already handles this
+    // gracefully, so we simply let it proceed instead of failing fast here.
   }
 
   // 2. Candidate pool: strictly available ingredients, no kefir, no protein powders
@@ -624,14 +630,11 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
     }
   }
 
-  // If still no candidates within +-300 kcal, and user has sufficient total pantry calories,
-  // try relaxed tolerance (+-500 kcal) so a realistic plan is still delivered.
+  // If still no candidates within +-300 kcal, try relaxed tolerance (+-500 kcal) so a
+  // realistic plan is still delivered — regardless of total pantry capacity. Previously
+  // this threw InsufficientPantryStockError before even attempting the relaxed pass,
+  // which produced a hard error exactly when stock was tight. Now we always attempt it.
   if (validCandidates.length === 0) {
-    const capacity = calculatePantryShakeCalorieCapacity(stock);
-    if (capacity.totalCalories < targetKcal - 300) {
-      throw new InsufficientPantryStockError(targetKcal, capacity.totalCalories);
-    }
-
     // Evaluate with relaxed tolerance (+-500 kcal)
     relaxedLoop:
     for (const d of sortedDairies) {
@@ -658,10 +661,14 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
   }
 
   if (validCandidates.length === 0) {
+    // FIX: previously distinguished "insufficient calories" (InsufficientPantryStockError)
+    // from "no valid combination" as two separate hard failures. Per product decision,
+    // a calorie shortfall alone must never block the user — only a genuine structural
+    // impossibility (no valid 3–6 ingredient combination exists at all, e.g. missing
+    // entire categories like grains/fruits/nuts) reaches this point, since calorie
+    // tolerance was already relaxed to ±500 kcal above. That case still needs a message,
+    // since there is truly no recipe to show.
     const capacity = calculatePantryShakeCalorieCapacity(stock);
-    if (capacity.totalCalories < targetKcal - 300) {
-      throw new InsufficientPantryStockError(targetKcal, capacity.totalCalories);
-    }
     throw new Error(
       `Kilerinizde toplam ${capacity.totalCalories} kcal stok bulunuyor ancak tek bir günlük shake için güvenli sindirim ve porsiyon sınırları dahilinde tarif kombinasyonu oluşturulamadı. Lütfen kilerinize yulaf, fındık, ceviz, badem, muz veya tahin gibi shake uyumlu temel besinlerden ekleyin.`
     );

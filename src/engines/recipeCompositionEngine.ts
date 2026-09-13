@@ -6,7 +6,7 @@ import {
   Ingredient,
 } from '../types';
 import { INGREDIENT_MAP, INGREDIENTS_DATABASE, canonicalIngredientId } from '../data/ingredients';
-import { calculateShakeNutrition } from './nutritionEngine';
+import { calculateShakeNutrition } from '../utils/nutritionEngine';
 import {
   getStoredStock,
   getStoredDislikedShakes,

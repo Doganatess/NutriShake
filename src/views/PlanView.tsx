@@ -300,10 +300,12 @@ export const PlanView: React.FC<PlanViewProps> = ({
         .filter((s) => s.id !== shake.id)
         .map((s) => s.name);
 
-      const optimalKcal = calculateOptimalDailyShakeKcal(profile);
-      const targetKcal = shake.estimatedCalories && shake.estimatedCalories > 600
-        ? shake.estimatedCalories
-        : optimalKcal;
+      // FIX: Previously this anchored the replacement's target to the OLD shake's own
+      // estimatedCalories whenever it was > 600 kcal. If a shake had ever been generated
+      // too low (e.g. 900 kcal), every subsequent "replace" would target ~900 kcal again,
+      // permanently perpetuating a low-calorie result. The replacement target must always
+      // be the app's fixed daily target (currently 3200 kcal, floored at 2500).
+      const targetKcal = calculateOptimalDailyShakeKcal(profile);
 
       let newShake: Shake;
 

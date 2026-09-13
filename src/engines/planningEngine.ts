@@ -1,6 +1,7 @@
 import { DailyPlan, Shake, UserProfile, MealAnalysis, DailyShake } from '../types';
 import { composeThreeDistinctDailyShakes, composeDeterministicShake } from './recipeCompositionEngine';
 import { getStoredProfile, saveDailyPlan } from '../storage/storageAbstraction';
+import { DAILY_TARGET_KCAL } from '../constants/calorieTargets';
 
 export interface PlanOptions {
   date?: string;
@@ -13,16 +14,20 @@ export interface PlanOptions {
  * abs(shakeTotalKcal - dailyTargetKcal) <= 300 kcal.
  *
  * Example:
- * Total Daily Goal: 3623 kcal
- * Daily Shake Total Target: 3623 kcal (Acceptable range: 3323 - 3923 kcal)
- *   Portion 1 (50%): ~1800 kcal
- *   Portion 2 (50%): ~1800 kcal
+ * Total Daily Goal: ~3200 kcal
+ * Daily Shake Total Target: ~3200 kcal (Acceptable range: 2900 - 3500 kcal)
+ *   Portion 1 (50%): ~1600 kcal
+ *   Portion 2 (50%): ~1600 kcal
  *
  * Main meal calories are tracked independently and are NOT subtracted from the shake target.
+ * 
+ * Formula: Math.max(DAILY_TARGET_KCAL, userProfile?.calorieGoal || 0)
+ * - If profile.calorieGoal is undefined or < DAILY_TARGET_KCAL: returns DAILY_TARGET_KCAL (3200)
+ * - If profile.calorieGoal is > DAILY_TARGET_KCAL: returns profile.calorieGoal
+ * - Result is never below DAILY_TARGET_KCAL
  */
 export function calculateOptimalDailyShakeKcal(userProfile?: UserProfile | null): number {
-  if (!userProfile) return 3623;
-  return userProfile.calorieGoal || 3623;
+  return Math.max(DAILY_TARGET_KCAL, userProfile?.calorieGoal || 0);
 }
 
 /**
@@ -41,7 +46,7 @@ export function generateDailyPlan(
 ): DailyPlan {
   const userProfile = profile !== undefined ? profile : getStoredProfile();
   
-  // Planned shake target matches dailyTargetKcal: 3623 kcal (+-300 kcal)
+  // Planned shake target matches dailyTargetKcal: ~3200 kcal (+-300 kcal)
   const targetShakesKcal = calculateOptimalDailyShakeKcal(userProfile);
 
   // Compose at least 3 distinct candidates

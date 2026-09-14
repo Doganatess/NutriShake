@@ -66,6 +66,77 @@ export function calculateRecipeSimilarity(
   return union === 0 ? 0 : intersection / union;
 }
 
+/**
+ * Counts how many canonical ingredients differ between two recipes (ingredients present
+ * in one set but not the other — i.e. the symmetric difference). Used to guarantee that
+ * "different" candidate shakes actually swap at least a couple of real ingredients,
+ * rather than passing a loose Jaccard-similarity threshold on a single 1-for-1 swap.
+ */
+export function countDifferingIngredients(
+  ingA: { ingredientId: string }[],
+  ingB: { ingredientId: string }[]
+): number {
+  const setA = new Set(ingA.map((i) => canonicalIngredientId(i.ingredientId)).filter(Boolean));
+  const setB = new Set(ingB.map((i) => canonicalIngredientId(i.ingredientId)).filter(Boolean));
+  let differing = 0;
+  for (const id of setA) if (!setB.has(id)) differing++;
+  for (const id of setB) if (!setA.has(id)) differing++;
+  return differing;
+}
+
+// Thick (non-liquid) dairy bases need added water to reach a drinkable milkshake
+// consistency. Ratio is relative to the yogurt's own weight — strained yogurt is
+// drained and much thicker than village yogurt, so it needs proportionally more water.
+// (Mirrors the same logic in recipeCompositionEngine.ts's deterministic builder —
+// duplicated here rather than imported to avoid a circular module dependency, since
+// recipeCompositionEngine.ts already imports from this file.)
+const YOGURT_WATER_RATIO: Record<string, number> = {
+  dairy_strained_yogurt: 0.6,
+  dairy_village_yogurt: 0.35,
+};
+
+/**
+ * If the recipe's dairy base is a thick yogurt (not already a pourable liquid like milk),
+ * automatically adds (or tops up) water so the finished shake is actually drinkable
+ * rather than spoon-thick. Water is calorie-free so this never affects the calorie target.
+ * Applied here so AI-generated shakes get the same consistency fix as the deterministic
+ * engine's own recipes — previously only the deterministic path had this.
+ */
+function addConsistencyWaterIfNeeded(ingredients: ShakeIngredient[]): ShakeIngredient[] {
+  const thickDairy = ingredients.find(
+    (i) => YOGURT_WATER_RATIO[canonicalIngredientId(i.ingredientId)] !== undefined
+  );
+  if (!thickDairy) return ingredients;
+
+  const ratio = YOGURT_WATER_RATIO[canonicalIngredientId(thickDairy.ingredientId)];
+  const waterMl = Math.round(thickDairy.amount * ratio);
+  if (waterMl <= 0) return ingredients;
+
+  const existingWaterIdx = ingredients.findIndex(
+    (i) => canonicalIngredientId(i.ingredientId) === 'other_water'
+  );
+  if (existingWaterIdx !== -1) {
+    const updated = [...ingredients];
+    const existing = updated[existingWaterIdx];
+    const newAmount = existing.amount + waterMl;
+    updated[existingWaterIdx] = { ...existing, amount: newAmount, quantity: newAmount };
+    return updated;
+  }
+
+  if (ingredients.length >= 6) return ingredients;
+
+  return [
+    ...ingredients,
+    {
+      ingredientId: 'other_water',
+      amount: waterMl,
+      quantity: waterMl,
+      unit: 'ml',
+      normalizedGrams: waterMl,
+    },
+  ];
+}
+
 export interface MasterValidatorOptions {
   targetKcal?: number;
   userStock?: Record<string, StockItem>;
@@ -153,6 +224,10 @@ export function validateMasterRecipe(
   if (stock) {
     for (const ing of ingredients) {
       const canonId = canonicalIngredientId(ing.ingredientId);
+      // Tap water is a free kitchen utility, not a tracked pantry item — it's added
+      // automatically for drinkable consistency (e.g. thinning thick yogurt) and must
+      // never require the user to have "water" in their stock list.
+      if (canonId === 'other_water') continue;
       const available = getAvailableStockGrams(stock, ing.ingredientId);
       const ingName = INGREDIENT_MAP[canonId]?.name || INGREDIENT_MAP[ing.ingredientId]?.name || ing.ingredientId;
 
@@ -565,6 +640,7 @@ export function validateAndSanitizeShake(
   }
 
   // 3. Intelligent Calorie Balancing & Scaling
+  workingIngredients = addConsistencyWaterIfNeeded(workingIngredients);
   let initialNutrition = calculateShakeNutrition(workingIngredients);
   if (options.targetKcal && options.targetKcal > 0 && workingIngredients.length > 0) {
     const target = options.targetKcal;

@@ -249,7 +249,11 @@ export function generateDeterministicDailyPlan(req: GeneratePlanRequest): DailyP
     targetRemainingCalories: req.remainingKcalNeeded,
     shakes: candidates,
     candidateShakes: candidates,
-    selectedShakeId: masterShake.id,
+    // FIX: previously auto-selected the first/master candidate, so the user never
+    // got a real choice among the alternatives — see planningEngine.ts for the
+    // matching fix. Left unset when there's more than one candidate so the UI
+    // can prompt the user to pick.
+    selectedShakeId: candidates.length === 1 ? masterShake.id : undefined,
     dailyShake,
     totalCalories: masterShake.estimatedCalories,
     completedCalories: 0,
@@ -288,21 +292,20 @@ export interface AnalyzeMealRequest {
 export async function analyzeMealWithVision(req: AnalyzeMealRequest) {
   const ai = getAiClient();
 
-  const prompt = `Sen uzman bir klinik diyetisyen ve beslenme analistisin.
-Gelen fotoğraftaki yemeği/öğünü dikkatle incele.
+  const prompt = `Sen uzman bir klinik diyetisyen ve beslenme analistisin. Fotoğraftaki öğünü, bir gıda etiketi hazırlıyormuş titizliğinde analiz et.
 Kullanıcının belirttiği öğün adı: "${req.mealName || 'Öğün'}".
 Ek kullanıcı notu: "${req.userNotes || 'Belirtilmemiş'}".
 
-GÖREVLER:
-1. Tabaktaki/masadaki yiyecekleri tespit et.
-2. Fotoğraftaki porsiyonları, tabak ölçeğini ve pişirme şeklini (kızartma, haşlama, ızgara vb.) profesyonelce tahmin et.
-3. KESİN OLAN VE OLMAYAN AYRIMINI YAP: Fotoğraftan porsiyon ve gizli yağlar (sos, sıvı yağ) tam bilinemez. Bu nedenle ASLA kesin konuşma, her zaman "TAHMİNİ" değer ver.
-4. Toplam kalori için hem minimum-maksimum aralığı (örneğin 650-800) hem de ortalama merkezi değeri belirle.
-5. Makro tahminlerini (protein, karbonhidrat, yağ gramları) hesapla.
-6. Emin olmadığın veya net görünmeyen yiyecekleri uydurma! Güven seviyesini "low", "medium" veya "high" olarak belirt ve notlara açıklama düş (Örn: "Sosun içeriği net seçilemediğinden kalori aralığı geniş tutulmuştur").
+ADIM ADIM ÇALIŞMA YÖNTEMİ:
+1. TESPİT: Tabaktaki/bardaktaki/masadaki HER ŞEYİ tek tek listele — ana yemek, garnitür, salata, sos/dressing, ekmek, içecek, tatlı, süsleme (maydanoz, susam vb.) dahil. Küçük veya arka planda kalan öğeleri de atlama.
+2. ÖLÇEK REFERANSI: Tabak/bardak/çatal-kaşık gibi görünen nesnelerin standart boyutlarını (ör. yemek tabağı ~26-28cm çap, yemek kaşığı ~15ml, çay bardağı ~200ml) referans alarak her öğe için GRAM/ML cinsinden somut bir ağırlık tahmini yap — sadece "1 porsiyon" gibi belirsiz ifadelerle yetinme, mutlaka bir sayı ver (ör. "~180g").
+3. PİŞİRME YÖNTEMİ: Her ana öğe için pişirme şeklini (kızartma, haşlama, ızgara, fırın, çiğ) belirle; kızartmada emilen gizli yağı hesaba kat.
+4. MAKRO HESABI: Her öğe için ayrı ayrı kalori, protein, karbonhidrat, yağ ve lif gramını tahmin et, sonra bunları topla — toplamı öğe bazlı tahminlerle tutarlı olsun.
+5. BELİRSİZLİK: Fotoğraftan porsiyon ve gizli yağlar (sos, sıvı yağ) tam bilinemez. ASLA kesin konuşma, her zaman "TAHMİNİ" değer ver ve toplam için hem minimum-maksimum aralığı hem ortalama merkezi değeri belirle.
+6. GÜVEN SEVİYESİ: Emin olmadığın veya net görünmeyen yiyecekleri uydurma! Her öğe ve genel öğün için güven seviyesini "low", "medium" veya "high" olarak belirt ve notlara açıklama düş (Örn: "Sosun içeriği net seçilemediğinden kalori aralığı geniş tutulmuştur").
 7. Türkçe, nazik ve bilgilendirici bir özet sun.
 
-Aşağıdaki JSON şemasına harfiyen uygun bir JSON yanıtı ver.`;
+Aşağıdaki JSON şemasına harfiyen uygun, hiçbir alanı atlamadan bir JSON yanıtı ver.`;
 
   return withRetry(async () => {
     return await callWithModelFallback(async (model) => {
@@ -330,11 +333,13 @@ Aşağıdaki JSON şemasına harfiyen uygun bir JSON yanıtı ver.`;
                   type: Type.OBJECT,
                   properties: {
                     name: { type: Type.STRING, description: 'Yiyecek adı (Örn: Izgara Tavuk Göğsü)' },
-                    portion: { type: Type.STRING, description: 'Tahmini porsiyon (Örn: ~150g, 1 porsiyon)' },
+                    portion: { type: Type.STRING, description: 'Tahmini porsiyon açıklaması (Örn: "1 porsiyon, orta boy")' },
+                    estimatedGrams: { type: Type.INTEGER, description: 'Bu öğenin tahmini ağırlığı, gram veya ml cinsinden somut bir sayı (Örn: 180)' },
                     estimatedCalories: { type: Type.INTEGER, description: 'Yaklaşık kcal' },
                     protein: { type: Type.NUMBER, description: 'Protein (g)' },
                     carbs: { type: Type.NUMBER, description: 'Karbonhidrat (g)' },
                     fat: { type: Type.NUMBER, description: 'Yağ (g)' },
+                    fiber: { type: Type.NUMBER, description: 'Lif (g)' },
                     confidence: {
                       type: Type.STRING,
                       enum: ['low', 'medium', 'high'],
@@ -342,7 +347,7 @@ Aşağıdaki JSON şemasına harfiyen uygun bir JSON yanıtı ver.`;
                     },
                     note: { type: Type.STRING, description: 'Pişirme veya porsiyon notu' },
                   },
-                  required: ['name', 'portion', 'estimatedCalories', 'protein', 'carbs', 'fat', 'confidence'],
+                  required: ['name', 'portion', 'estimatedGrams', 'estimatedCalories', 'protein', 'carbs', 'fat', 'fiber', 'confidence'],
                 },
               },
               calorieMin: { type: Type.INTEGER, description: 'Tahmini minimum kcal (Örn: 650)' },
@@ -351,6 +356,8 @@ Aşağıdaki JSON şemasına harfiyen uygun bir JSON yanıtı ver.`;
               protein: { type: Type.NUMBER, description: 'Toplam protein (g)' },
               carbs: { type: Type.NUMBER, description: 'Toplam karbonhidrat (g)' },
               fat: { type: Type.NUMBER, description: 'Toplam yağ (g)' },
+              fiber: { type: Type.NUMBER, description: 'Toplam lif (g)' },
+              totalEstimatedGrams: { type: Type.INTEGER, description: 'Tüm öğünün toplam tahmini ağırlığı (g)' },
               confidence: {
                 type: Type.STRING,
                 enum: ['low', 'medium', 'high'],
@@ -367,6 +374,7 @@ Aşağıdaki JSON şemasına harfiyen uygun bir JSON yanıtı ver.`;
               'protein',
               'carbs',
               'fat',
+              'fiber',
               'confidence',
               'cookingStyleNotes',
               'analysisSummary',
@@ -443,17 +451,21 @@ KESİN KALORİ KURALI (HAYATİ ÖNEMDE):
 
 ÇEŞİTLİLİK VE MALZEME SAYISI KURALI (EN AZ 3 FARKLI TARİF):
 - Kullanıcıya sunulmak üzere birbiriyle lezzet, kıvam ve malzeme açısından belirgin şekilde FARKLI en az 3 ADET shake adayı üret.
-- 3 alternatif birbirinden Jaccard benzerliği < 0.70 olacak kadar farklı olmalıdır (farklı meyve ve kuruyemiş kombinasyonları).
+- Her iki alternatif arasında EN AZ 2 MALZEME TAMAMEN FARKLI olmalıdır (sadece tek bir malzemeyi değiştirip diğerlerini aynı bırakmak YETERSİZDİR ve KESİNLİKLE KABUL EDİLMEZ).
   * Örneğin 1. Alternatif: Muz + Fındık + Yulaf + Süt
   * Örneğin 2. Alternatif: Çilek/Elma + Ceviz/Badem + Yulaf + Yoğurt
   * Örneğin 3. Alternatif: Kuru Meyve (hurma/incir) + Tahin/Fıstık + Yulaf + Süt
-- Asla tek bir tarifin kopyasını veya sadece ismini değiştirerek döndürme!
+- Asla tek bir tarifin kopyasını veya sadece ismini/tek malzemesini değiştirerek döndürme!
 - STOĞA EKLENEN HER ÜRÜN SHAKE'E GİRMEZ! Kilerde 10 malzeme varsa hepsini tek shake'e doldurmak KESİNLİKLE YASAKTIR.
 - MİNİMUM GEREKLİ MALZEME SAYISI KURALI: Her aday shake hedef kalori ve kuralları sağlayan minimum malzeme ile (4 ile en fazla 6 malzeme) oluşturulmalıdır. Asla 6'dan fazla malzeme kullanma!
 - "SERBEST (ALLOWED)": Bu malzeme kullanılabilir ancak zorunlu değildir.
 - "ZORUNLU (MANDATORY)": Önceliklendirilebilir ancak shake dengesini bozacak şekilde hepsini birden tek shake'e doldurma.
 - "STOKTA VAR": Sadece bir uygunluk şartıdır, "Shake'e ekle" anlamına gelmez.
 - MALİYETİ MİNİMİZE ET: Mümkün olan en düşük maliyetli geçerli kombinasyonları oluştur.
+
+KIVAM KURALI (SU EKLEME):
+- Süt zaten sıvıdır, ekstra su gerekmez.
+- Ancak Köy Yoğurdu veya Süzme Yoğurt gibi KOYU/YOĞUN süt ürünleri kullanılıyorsa, shake'in içilebilir (blenderdan sonra kaşıkla değil pipetle/bardaktan içilebilir) bir kıvama gelmesi için tarife MUTLAKA su ekle. Su miktarını yoğurdun yoğunluğuna göre kendin belirle (Süzme Yoğurt için yoğurt miktarının ~%50-60'ı kadar, Köy Yoğurdu için ~%30-40'ı kadar su, ml cinsinden). Eklenen su kalori içermez, hedef kaloriyi etkilemez.
 - Her aday tek başına ${minAcceptableKcal} - ${maxAcceptableKcal} kcal bandında olmalıdır.
 
 ZORUNLU SÜT ÜRÜNÜ & MEYVE & KEFİR KURALLARI (HAYATİ KURALLAR):
@@ -729,7 +741,9 @@ Aşağıdaki JSON formatında en az 3 adet shake adayı içeren bir plan yanıt�
           targetRemainingCalories: req.remainingKcalNeeded,
           shakes: verifiedShakes,
           candidateShakes: verifiedShakes,
-          selectedShakeId: masterShake.id,
+          // FIX: see the other two selectedShakeId sites in this file/planningEngine.ts —
+          // must not auto-pick a candidate; the user chooses in TodayView.
+          selectedShakeId: verifiedShakes.length === 1 ? masterShake.id : undefined,
           dailyShake,
           totalCalories: masterShake.estimatedCalories,
           completedCalories: 0,

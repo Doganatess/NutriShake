@@ -59,8 +59,17 @@ export const TodayView: React.FC<TodayViewProps> = ({
     Math.round((nutritionSummary.consumedProtein / (nutritionSummary.proteinGoal || 1)) * 100)
   );
 
-  // Master shake for the day (1 Shake = 2 Equal Portions)
-  const masterShake: Shake | null = plan?.shakes && plan.shakes.length > 0 ? plan.shakes[0] : null;
+  // Master shake for the day (1 Shake = 2 Equal Portions).
+  // FIX: previously this always used shakes[0], so the user's 3 generated
+  // alternatives were never actually chosen between — Today always silently
+  // tracked the first one. Now it uses the user's explicit selection
+  // (plan.selectedShakeId); with only one candidate it's auto-selected.
+  const needsShakeSelection = !!plan?.shakes && plan.shakes.length > 1 && !plan.selectedShakeId;
+  const masterShake: Shake | null = plan?.shakes && plan.shakes.length > 0
+    ? (plan.selectedShakeId
+        ? plan.shakes.find((s) => s.id === plan.selectedShakeId) || null
+        : (plan.shakes.length === 1 ? plan.shakes[0] : null))
+    : null;
 
   const plannedShakeCalories = masterShake ? masterShake.estimatedCalories : (profile.dailySurplusKcal || 1000);
   const portion1Calories = masterShake
@@ -140,6 +149,30 @@ export const TodayView: React.FC<TodayViewProps> = ({
       updatedAt: new Date().toISOString(),
     };
 
+    saveDailyPlan(updatedPlan);
+    onRefreshData();
+  };
+
+  // User picks which of the 3 generated candidates is today's actual shake.
+  const handleSelectShake = (shakeId: string) => {
+    if (!plan) return;
+    const updatedPlan: DailyPlan = {
+      ...plan,
+      selectedShakeId: shakeId,
+      updatedAt: new Date().toISOString(),
+    };
+    saveDailyPlan(updatedPlan);
+    onRefreshData();
+  };
+
+  // Lets the user go back and pick a different one of the 3 candidates.
+  const handleChangeSelection = () => {
+    if (!plan) return;
+    const updatedPlan: DailyPlan = {
+      ...plan,
+      selectedShakeId: undefined,
+      updatedAt: new Date().toISOString(),
+    };
     saveDailyPlan(updatedPlan);
     onRefreshData();
   };
@@ -303,10 +336,14 @@ export const TodayView: React.FC<TodayViewProps> = ({
                   Günün Shake Planı
                 </span>
                 <h3 className="text-sm font-bold text-stone-900 leading-tight">
-                  {plan.shakes.length} Farklı Shake Hazırlandı
+                  {needsShakeSelection
+                    ? `${plan.shakes.length} Seçenekten Birini Seç`
+                    : (masterShake ? masterShake.name : `${plan.shakes.length} Farklı Shake Hazırlandı`)}
                 </h3>
                 <p className="text-[11px] text-stone-600 mt-0.5 truncate">
-                  {plan.shakes.map((s) => s.name).join(' • ')}
+                  {needsShakeSelection
+                    ? plan.shakes.map((s) => s.name).join(' • ')
+                    : `${masterShake?.estimatedCalories ?? ''} kcal • 2 eşit porsiyon`}
                 </p>
               </div>
               <ChevronRight className="w-5 h-5 text-emerald-700 shrink-0" />
@@ -345,8 +382,8 @@ export const TodayView: React.FC<TodayViewProps> = ({
         )}
       </div>
 
-      {/* 3. Günün Shake Tarifleri (Kiler stoğuna uygun üretilen tüm geçerli tarifler) */}
-      {plan && plan.shakes && plan.shakes.length > 0 && (
+      {/* 3. Günün Shake(leri): seçim gerekiyorsa seçim ekranı, seçiliyse sadece o shake */}
+      {plan && plan.shakes && plan.shakes.length > 0 && needsShakeSelection && (
         <div className="space-y-3">
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2">
@@ -354,15 +391,14 @@ export const TodayView: React.FC<TodayViewProps> = ({
                 🥤
               </span>
               <h3 className="text-xs font-bold uppercase tracking-wider text-stone-700">
-                Günün Shake Tarifleri ({plan.shakes.length} Farklı Seçenek)
+                Bugün İçin Bir Shake Seç ({plan.shakes.length} Seçenek)
               </h3>
             </div>
-            <button
-              onClick={onNavigateToPlan}
-              className="text-xs text-emerald-700 font-semibold hover:underline flex items-center gap-1"
-            >
-              Tüm Detaylar & Değiştir <ChevronRight className="w-3.5 h-3.5" />
-            </button>
+          </div>
+
+          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-900 text-xs flex items-center gap-2">
+            <Info className="w-4 h-4 text-emerald-700 shrink-0" />
+            <span>Aşağıdaki seçeneklerden birini seçtiğinde, sadece o shake bugüne eklenir ve porsiyon takibi başlar. Diğerleri gizlenir.</span>
           </div>
 
           {plan.shakes.length < 3 && (
@@ -374,139 +410,215 @@ export const TodayView: React.FC<TodayViewProps> = ({
             </div>
           )}
 
-          {plan.shakes.map((shake, shakeIdx) => {
-            const portionCal = shake.portionCalories || Math.round(shake.estimatedCalories / 2);
-            const p1Done = !!shake.portion1Completed;
-            const p2Done = !!shake.portion2Completed;
-
-            return (
-              <div key={shake.id || shakeIdx} className="bg-white rounded-3xl p-4 sm:p-5 border border-stone-200 shadow-xs">
-                {/* Shake Title & Macro Summary */}
-                <div className="bg-stone-50 rounded-2xl p-3.5 border border-stone-100 mb-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-stone-200 text-stone-700">
-                          Shake {shakeIdx + 1}
-                        </span>
-                        <h4 className="text-sm font-bold text-stone-900">{shake.name}</h4>
-                      </div>
-                      <p className="text-[11px] text-stone-500 mt-1">
-                        Toplam {shake.estimatedCalories} kcal • {shake.protein}g Protein • {shake.carbs}g Karb • {shake.fat}g Yağ
-                      </p>
+          {plan.shakes.map((shake, shakeIdx) => (
+            <div key={shake.id || shakeIdx} className="bg-white rounded-3xl p-4 sm:p-5 border border-stone-200 shadow-xs">
+              <div className="bg-stone-50 rounded-2xl p-3.5 border border-stone-100 mb-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-stone-200 text-stone-700">
+                        Shake {shakeIdx + 1}
+                      </span>
+                      <h4 className="text-sm font-bold text-stone-900">{shake.name}</h4>
                     </div>
-                    <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 shrink-0">
-                      2 Eşit Porsiyon
-                    </span>
+                    <p className="text-[11px] text-stone-500 mt-1">
+                      Toplam {shake.estimatedCalories} kcal • {shake.protein}g Protein • {shake.carbs}g Karb • {shake.fat}g Yağ
+                    </p>
                   </div>
-
-                  {/* Ingredients overview */}
-                  <div className="mt-2.5 pt-2 border-t border-stone-200/60 flex flex-wrap gap-1.5">
-                    {shake.ingredients.map((ingItem, idx) => {
-                      const ing = INGREDIENT_MAP[ingItem.ingredientId];
-                      return (
-                        <span
-                          key={idx}
-                          className="text-[11px] bg-white px-2 py-0.5 rounded-lg border border-stone-200 text-stone-700 flex items-center gap-1 font-medium"
-                        >
-                          <span>{ing?.icon || '🥣'}</span>
-                          <span>{ing?.name || ingItem.ingredientId}</span>
-                          <span className="text-stone-400 font-bold">({ingItem.amount}g)</span>
-                        </span>
-                      );
-                    })}
-                  </div>
+                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 shrink-0">
+                    2 Eşit Porsiyon
+                  </span>
                 </div>
 
-                {/* 1. Öğün & 2. Öğün Action Cards (Portion Controls) */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {/* 1. Öğün */}
-                  <div
-                    className={`p-3.5 rounded-2xl border transition flex flex-col justify-between ${
-                      p1Done ? 'bg-emerald-50/60 border-emerald-300' : 'bg-stone-50 border-stone-200'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
-                        <span
-                          className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                            p1Done ? 'bg-emerald-600 text-white' : 'bg-stone-300 text-stone-700'
-                          }`}
-                        >
-                          {p1Done ? '✓' : '1'}
-                        </span>
-                        1. Öğün (1. Porsiyon)
-                      </span>
+                <div className="mt-2.5 pt-2 border-t border-stone-200/60 flex flex-wrap gap-1.5">
+                  {shake.ingredients.map((ingItem, idx) => {
+                    const ing = INGREDIENT_MAP[ingItem.ingredientId];
+                    const isLiquid = ing?.category === 'dairy' || ing?.shakeCompatibility === 'liquid';
+                    const unitLabel = isLiquid ? 'ml' : 'g';
+                    return (
                       <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                          p1Done ? 'bg-emerald-100 text-emerald-800' : 'bg-stone-200 text-stone-600'
-                        }`}
+                        key={idx}
+                        className="text-[11px] bg-white px-2 py-0.5 rounded-lg border border-stone-200 text-stone-700 flex items-center gap-1 font-medium"
                       >
-                        {p1Done ? 'İçildi ✓' : 'İçilmedi'}
+                        <span>{ing?.icon || '🥣'}</span>
+                        <span>{ing?.name || ingItem.ingredientId}</span>
+                        <span className="text-stone-400 font-bold">({Math.round(ingItem.amount)}{unitLabel})</span>
                       </span>
-                    </div>
-                    <div className="text-xs text-stone-500 mb-3">
-                      <strong className="text-stone-800 font-bold">{portionCal} kcal</strong> • Tarifin %50'si
-                    </div>
-                    <button
-                      onClick={() => handleTogglePortion(shake.id, 1)}
-                      className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border ${
-                        p1Done
-                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                          : 'bg-white border-stone-300 text-stone-800 hover:border-emerald-400 hover:text-emerald-700'
-                      }`}
-                    >
-                      <CheckCircle2 className={`w-3.5 h-3.5 ${p1Done ? 'text-white' : 'text-stone-400'}`} />
-                      <span>{p1Done ? 'İçildi (Geri Al)' : '✓ 1. Öğünü İçtim'}</span>
-                    </button>
-                  </div>
-
-                  {/* 2. Öğün */}
-                  <div
-                    className={`p-3.5 rounded-2xl border transition flex flex-col justify-between ${
-                      p2Done ? 'bg-emerald-50/60 border-emerald-300' : 'bg-stone-50 border-stone-200'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
-                        <span
-                          className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
-                            p2Done ? 'bg-emerald-600 text-white' : 'bg-stone-300 text-stone-700'
-                          }`}
-                        >
-                          {p2Done ? '✓' : '2'}
-                        </span>
-                        2. Öğün (2. Porsiyon)
-                      </span>
-                      <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                          p2Done ? 'bg-emerald-100 text-emerald-800' : 'bg-stone-200 text-stone-600'
-                        }`}
-                      >
-                        {p2Done ? 'İçildi ✓' : 'İçilmedi'}
-                      </span>
-                    </div>
-                    <div className="text-xs text-stone-500 mb-3">
-                      <strong className="text-stone-800 font-bold">{portionCal} kcal</strong> • Tarifin %50'si
-                    </div>
-                    <button
-                      onClick={() => handleTogglePortion(shake.id, 2)}
-                      className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border ${
-                        p2Done
-                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
-                          : 'bg-white border-stone-300 text-stone-800 hover:border-emerald-400 hover:text-emerald-700'
-                      }`}
-                    >
-                      <CheckCircle2 className={`w-3.5 h-3.5 ${p2Done ? 'text-white' : 'text-stone-400'}`} />
-                      <span>{p2Done ? 'İçildi (Geri Al)' : '✓ 2. Öğünü İçtim'}</span>
-                    </button>
-                  </div>
+                    );
+                  })}
                 </div>
               </div>
-            );
-          })}
+
+              <button
+                onClick={() => handleSelectShake(shake.id)}
+                className="w-full py-2.5 px-3 rounded-2xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                Bu Shake'i Bugün İçin Seç
+              </button>
+            </div>
+          ))}
         </div>
       )}
+
+      {plan && masterShake && !needsShakeSelection && (() => {
+        const shake = masterShake;
+        const portionCal = shake.portionCalories || Math.round(shake.estimatedCalories / 2);
+        const p1Done = !!shake.portion1Completed;
+        const p2Done = !!shake.portion2Completed;
+
+        return (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between px-1">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center text-xs font-bold">
+                  🥤
+                </span>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-stone-700">
+                  Bugünün Shake'i
+                </h3>
+              </div>
+              <div className="flex items-center gap-3">
+                {plan.shakes.length > 1 && (
+                  <button
+                    onClick={handleChangeSelection}
+                    className="text-xs text-stone-500 font-semibold hover:underline"
+                  >
+                    Farklı Seç
+                  </button>
+                )}
+                <button
+                  onClick={onNavigateToPlan}
+                  className="text-xs text-emerald-700 font-semibold hover:underline flex items-center gap-1"
+                >
+                  Tüm Detaylar & Değiştir <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl p-4 sm:p-5 border border-stone-200 shadow-xs">
+              {/* Shake Title & Macro Summary */}
+              <div className="bg-stone-50 rounded-2xl p-3.5 border border-stone-100 mb-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-bold text-stone-900">{shake.name}</h4>
+                    <p className="text-[11px] text-stone-500 mt-1">
+                      Toplam {shake.estimatedCalories} kcal • {shake.protein}g Protein • {shake.carbs}g Karb • {shake.fat}g Yağ
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 shrink-0">
+                    2 Eşit Porsiyon
+                  </span>
+                </div>
+
+                {/* Ingredients overview */}
+                <div className="mt-2.5 pt-2 border-t border-stone-200/60 flex flex-wrap gap-1.5">
+                  {shake.ingredients.map((ingItem, idx) => {
+                    const ing = INGREDIENT_MAP[ingItem.ingredientId];
+                    const isLiquid = ing?.category === 'dairy' || ing?.shakeCompatibility === 'liquid';
+                    const unitLabel = isLiquid ? 'ml' : 'g';
+                    return (
+                      <span
+                        key={idx}
+                        className="text-[11px] bg-white px-2 py-0.5 rounded-lg border border-stone-200 text-stone-700 flex items-center gap-1 font-medium"
+                      >
+                        <span>{ing?.icon || '🥣'}</span>
+                        <span>{ing?.name || ingItem.ingredientId}</span>
+                        <span className="text-stone-400 font-bold">({Math.round(ingItem.amount)}{unitLabel})</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 1. Öğün & 2. Öğün Action Cards (Portion Controls) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {/* 1. Öğün */}
+                <div
+                  className={`p-3.5 rounded-2xl border transition flex flex-col justify-between ${
+                    p1Done ? 'bg-emerald-50/60 border-emerald-300' : 'bg-stone-50 border-stone-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
+                      <span
+                        className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                          p1Done ? 'bg-emerald-600 text-white' : 'bg-stone-300 text-stone-700'
+                        }`}
+                      >
+                        {p1Done ? '✓' : '1'}
+                      </span>
+                      1. Öğün (1. Porsiyon)
+                    </span>
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        p1Done ? 'bg-emerald-100 text-emerald-800' : 'bg-stone-200 text-stone-600'
+                      }`}
+                    >
+                      {p1Done ? 'İçildi ✓' : 'İçilmedi'}
+                    </span>
+                  </div>
+                  <div className="text-xs text-stone-500 mb-3">
+                    <strong className="text-stone-800 font-bold">{portionCal} kcal</strong> • Tarifin %50'si
+                  </div>
+                  <button
+                    onClick={() => handleTogglePortion(shake.id, 1)}
+                    className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border ${
+                      p1Done
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                        : 'bg-white border-stone-300 text-stone-800 hover:border-emerald-400 hover:text-emerald-700'
+                    }`}
+                  >
+                    <CheckCircle2 className={`w-3.5 h-3.5 ${p1Done ? 'text-white' : 'text-stone-400'}`} />
+                    <span>{p1Done ? 'İçildi (Geri Al)' : '✓ 1. Öğünü İçtim'}</span>
+                  </button>
+                </div>
+
+                {/* 2. Öğün */}
+                <div
+                  className={`p-3.5 rounded-2xl border transition flex flex-col justify-between ${
+                    p2Done ? 'bg-emerald-50/60 border-emerald-300' : 'bg-stone-50 border-stone-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-stone-900 flex items-center gap-1.5">
+                      <span
+                        className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                          p2Done ? 'bg-emerald-600 text-white' : 'bg-stone-300 text-stone-700'
+                        }`}
+                      >
+                        {p2Done ? '✓' : '2'}
+                      </span>
+                      2. Öğün (2. Porsiyon)
+                    </span>
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        p2Done ? 'bg-emerald-100 text-emerald-800' : 'bg-stone-200 text-stone-600'
+                      }`}
+                    >
+                      {p2Done ? 'İçildi ✓' : 'İçilmedi'}
+                    </span>
+                  </div>
+                  <div className="text-xs text-stone-500 mb-3">
+                    <strong className="text-stone-800 font-bold">{portionCal} kcal</strong> • Tarifin %50'si
+                  </div>
+                  <button
+                    onClick={() => handleTogglePortion(shake.id, 2)}
+                    className={`w-full py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border ${
+                      p2Done
+                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                        : 'bg-white border-stone-300 text-stone-800 hover:border-emerald-400 hover:text-emerald-700'
+                    }`}
+                  >
+                    <CheckCircle2 className={`w-3.5 h-3.5 ${p2Done ? 'text-white' : 'text-stone-400'}`} />
+                    <span>{p2Done ? 'İçildi (Geri Al)' : '✓ 2. Öğünü İçtim'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 4. Today's Logged Meals (Ayrı Ana Öğün Takibi) */}
       <div className="bg-white rounded-3xl p-4 sm:p-5 border border-stone-200 shadow-xs">

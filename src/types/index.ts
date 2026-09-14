@@ -290,10 +290,12 @@ export interface WeeklyPlan {
 export interface DetectedFoodItem {
   name: string;
   portion: string;
+  estimatedGrams?: number;
   estimatedCalories: number;
   protein: number;
   carbs: number;
   fat: number;
+  fiber?: number;
   confidence: 'low' | 'medium' | 'high';
   note?: string;
 }

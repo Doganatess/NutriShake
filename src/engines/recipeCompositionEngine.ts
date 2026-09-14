@@ -21,6 +21,7 @@ import {
   validateMasterRecipe,
   getRecipeFingerprint,
   calculateRecipeSimilarity,
+  countDifferingIngredients,
   ALLOWED_DAIRY_CANONICAL_IDS,
 } from '../utils/recipeValidator';
 import { calculatePantryShakeCalorieCapacity, getAvailableStockGrams } from './stockEngine';
@@ -232,6 +233,56 @@ export function getIngredientCostPerKcal(ing: Ingredient): number {
  * Builds a single valid Shake recipe from a chosen candidate combination (4-6 items).
  * Dynamically scales amounts to hit targetKcal (+-300 kcal) using the cheapest calories first.
  */
+// Thick (non-liquid) dairy bases need added water to reach a drinkable milkshake
+// consistency. Ratio is relative to the yogurt's own weight — strained yogurt is
+// drained and much thicker than village yogurt, so it needs proportionally more water.
+const YOGURT_WATER_RATIO: Record<string, number> = {
+  dairy_strained_yogurt: 0.6,
+  dairy_village_yogurt: 0.35,
+};
+
+/**
+ * If the recipe's dairy base is a thick yogurt (not already a pourable liquid like milk),
+ * automatically adds (or tops up) water so the finished shake is actually drinkable
+ * rather than spoon-thick. Water is calorie-free so this never affects the calorie target.
+ */
+function addConsistencyWaterIfNeeded(ingredients: ShakeIngredient[]): ShakeIngredient[] {
+  const thickDairy = ingredients.find(
+    (i) => YOGURT_WATER_RATIO[canonicalIngredientId(i.ingredientId)] !== undefined
+  );
+  if (!thickDairy) return ingredients;
+
+  const ratio = YOGURT_WATER_RATIO[canonicalIngredientId(thickDairy.ingredientId)];
+  const waterMl = Math.round(thickDairy.amount * ratio);
+  if (waterMl <= 0) return ingredients;
+
+  const existingWaterIdx = ingredients.findIndex(
+    (i) => canonicalIngredientId(i.ingredientId) === 'other_water'
+  );
+  if (existingWaterIdx !== -1) {
+    const updated = [...ingredients];
+    const existing = updated[existingWaterIdx];
+    const newAmount = existing.amount + waterMl;
+    updated[existingWaterIdx] = { ...existing, amount: newAmount, quantity: newAmount };
+    return updated;
+  }
+
+  // Only add a new ingredient slot if there's still room within the 3-6 rule; if the
+  // combo is already at 6, skip rather than fail the whole recipe over consistency.
+  if (ingredients.length >= 6) return ingredients;
+
+  return [
+    ...ingredients,
+    {
+      ingredientId: 'other_water',
+      amount: waterMl,
+      quantity: waterMl,
+      unit: 'ml',
+      normalizedGrams: waterMl,
+    },
+  ];
+}
+
 function buildShakeFromIngredientCombo(
   combo: Ingredient[],
   targetKcal: number,
@@ -319,7 +370,8 @@ function buildShakeFromIngredientCombo(
       };
     });
 
-  const shakeIngredients = mergeDuplicateIngredients(rawShakeIngredients);
+  let shakeIngredients = mergeDuplicateIngredients(rawShakeIngredients);
+  shakeIngredients = addConsistencyWaterIfNeeded(shakeIngredients);
   if (shakeIngredients.length < 3 || shakeIngredients.length > 6) return null;
 
   // Rule 1: Exactly 1 dairy
@@ -524,12 +576,23 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
     (i) => (i.category === 'sweeteners' || i.category === 'cocoa_extras') && availableStock(i.id) >= 10
   );
 
-  // Priority sorting: mandatory items first, then cost-efficient items
+  // Priority sorting: mandatory items first, then LOW STOCK items (to help use up
+  // near-depleted pantry items before they spoil/are forgotten), then cost-efficient items.
+  // FIX: previously sorted purely by cost-per-kcal, so a nearly-finished item (e.g. 20g of
+  // hazelnuts left) competed only on price and was rarely chosen over a fully-stocked,
+  // cheaper alternative — it just sat in the pantry indefinitely.
   const isMandatory = (id: string) => (options.mandatoryIngredientIds?.includes(id) ? 1 : 0);
+  const LOW_STOCK_THRESHOLD_G = 60;
+  const isRunningLow = (id: string) => {
+    const avail = availableStock(id);
+    return avail > 0 && avail <= LOW_STOCK_THRESHOLD_G ? 1 : 0;
+  };
   const sortPool = (list: Ingredient[]) => {
     return list.slice().sort((a, b) => {
       const mandDiff = isMandatory(b.id) - isMandatory(a.id);
       if (mandDiff !== 0) return mandDiff;
+      const lowStockDiff = isRunningLow(b.id) - isRunningLow(a.id);
+      if (lowStockDiff !== 0) return lowStockDiff;
       return getIngredientCostPerKcal(a) - getIngredientCostPerKcal(b);
     });
   };
@@ -542,7 +605,7 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
 
   // 3. Generate candidate combinations of 4 to 6 ingredients
   // NEVER use all stock at once! Each recipe gets only 4 to 6 items.
-  const validCandidates: Shake[] = [];
+  let validCandidates: Shake[] = [];
   const seenFingerprints = new Set<string>();
 
   const maxCombinationsToEvaluate = 100;
@@ -674,9 +737,55 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
     );
   }
 
-  // 4. SORT ALL VALID CANDIDATES: MINIMUM INGREDIENT COUNT FIRST, THEN LOWEST COST
+  // FIX: analyzeCompatibility() was already being computed per-shake but its score was
+  // only used for a cosmetic "why chosen" text line — it had zero influence on which
+  // combos actually got selected, so genuinely bland/clashing-flavor combos could win
+  // purely on cost/ingredient-count. Now: drop clearly incompatible combos outright
+  // (when better alternatives exist) and rank the rest by compatibility score first.
+  const MIN_ACCEPTABLE_COMPATIBILITY = 50; // below this = 'uyumsuz' (incompatible)
+  const compatibleCandidates = validCandidates.filter(
+    (c) => analyzeCompatibility(c.ingredients).score >= MIN_ACCEPTABLE_COMPATIBILITY
+  );
+  if (compatibleCandidates.length >= 3) {
+    validCandidates = compatibleCandidates;
+  }
+  const compatibilityScoreCache = new Map<Shake, number>();
+  const getCompatScore = (shake: Shake): number => {
+    let cached = compatibilityScoreCache.get(shake);
+    if (cached === undefined) {
+      cached = analyzeCompatibility(shake.ingredients).score;
+      compatibilityScoreCache.set(shake, cached);
+    }
+    return cached;
+  };
+
+  // 4. SORT ALL VALID CANDIDATES: LOW-STOCK USAGE FIRST, THEN INGREDIENT COUNT, THEN COST
+  const countLowStockIngredientsUsed = (shake: Shake): number => {
+    let count = 0;
+    for (const item of shake.ingredients) {
+      if (canonicalIngredientId(item.ingredientId) === 'other_water') continue;
+      const avail = stockOnly ? getAvailableStockGrams(stock, item.ingredientId) : 0;
+      if (avail > 0 && avail <= LOW_STOCK_THRESHOLD_G) count++;
+    }
+    return count;
+  };
+
   // Rule 3: Use the minimum necessary ingredient count to achieve target calories (4 before 5, 5 before 6)
   validCandidates.sort((a, b) => {
+    // Priority 0 (NEW): prefer recipes that help use up near-depleted pantry items,
+    // so small leftover quantities (e.g. 20g of hazelnuts) get consumed instead of
+    // sitting in the pantry indefinitely.
+    const lowStockA = countLowStockIngredientsUsed(a);
+    const lowStockB = countLowStockIngredientsUsed(b);
+    if (lowStockA !== lowStockB) {
+      return lowStockB - lowStockA;
+    }
+    // Priority 0.5 (NEW): prefer better flavor/texture compatibility, so combos that
+    // clash or taste bland don't win purely on cost.
+    const compatDiff = getCompatScore(b) - getCompatScore(a);
+    if (Math.abs(compatDiff) > 10) {
+      return compatDiff;
+    }
     // Primary (Priority 9): Minimum necessary ingredient count (4 items > 5 items > 6 items)
     if (a.ingredients.length !== b.ingredients.length) {
       return a.ingredients.length - b.ingredients.length;
@@ -706,10 +815,15 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
       continue;
     }
 
-    // Check diversity against already selected candidates (Jaccard similarity < 0.70)
+    // Check diversity against already selected candidates.
+    // FIX: previously only checked Jaccard similarity (< 0.70), but for a typical 4-5
+    // ingredient shake, swapping just ONE ingredient already drops similarity below 0.70
+    // (e.g. 4/6 ≈ 0.67), so two shakes differing by a single item were accepted as
+    // "distinct". Now also require at least 2 ingredients to actually differ.
     const isTooSimilar = selectedShakes.some((existing) => {
       const sim = calculateRecipeSimilarity(candidate.ingredients, existing.ingredients);
-      return sim >= 0.70;
+      const differing = countDifferingIngredients(candidate.ingredients, existing.ingredients);
+      return sim >= 0.70 || differing < 2;
     });
 
     if (isTooSimilar) continue;

@@ -98,7 +98,11 @@ export function generateDailyPlan(
     shakes: candidates,
     dailyShake,
     candidateShakes: candidates,
-    selectedShakeId: selectedShake.id,
+    // FIX: previously auto-selected the first candidate here, so the user never
+    // actually got to choose between the 3 generated alternatives — TodayView just
+    // silently tracked shakes[0]. Leaving this unset means TodayView shows a picker
+    // when there's more than one candidate, and the user's choice is what gets saved.
+    selectedShakeId: candidates.length === 1 ? selectedShake.id : undefined,
     totalCalories: selectedShake.estimatedCalories,
     completedCalories: 0,
     isFullyCompleted: false,

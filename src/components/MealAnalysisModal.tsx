@@ -411,7 +411,9 @@ export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
                       <div>
                         <div className="font-semibold text-stone-900">{item.name}</div>
                         <div className="text-[11px] text-stone-500">
-                          {item.portion} • {item.estimatedCalories} kcal • P: {item.protein}g | K: {item.carbs}g | Y: {item.fat}g
+                          {item.portion}
+                          {item.estimatedGrams ? ` (~${item.estimatedGrams}g)` : ''} • {item.estimatedCalories} kcal • P: {item.protein}g | K: {item.carbs}g | Y: {item.fat}g
+                          {item.fiber !== undefined ? ` | Lif: ${item.fiber}g` : ''}
                         </div>
                       </div>
                       <button

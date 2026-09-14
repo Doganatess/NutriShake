@@ -40,6 +40,9 @@ export const StockManager: React.FC<StockManagerProps> = ({ onStockChange }) => 
   const [stock, setStock] = useState<Record<string, StockItem>>(() => getStoredStock());
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
+  // Holds the raw (uncommitted) text of an amount input while the user is typing it,
+  // keyed by ingredientId. Falls back to the committed stock value once cleared.
+  const [editingAmounts, setEditingAmounts] = useState<Record<string, string>>({});
 
   // Add Item State
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -130,22 +133,35 @@ export const StockManager: React.FC<StockManagerProps> = ({ onStockChange }) => 
     setAddNote('');
   };
 
-  const handleQuickAdjust = (ingredientId: string, delta: number, e?: React.MouseEvent) => {
-    if (e) {
-      e.stopPropagation();
-      e.preventDefault();
-    }
-    const current = stock[ingredientId];
-    if (!current) return;
+  // Committing a typed amount now fully replaces the old +/- stepper buttons.
+  // Called on every keystroke in the direct amount input — only updates the local
+  // text buffer so the user can freely type/clear/backspace without committing yet.
+  const handleAmountInputChange = (ingredientId: string, value: string) => {
+    setEditingAmounts((prev) => ({ ...prev, [ingredientId]: value }));
+  };
 
-    const newAmount = Math.max(0, current.amount + delta);
+  // Commits the typed amount to the stock (on blur or Enter). Invalid/empty input is
+  // ignored (reverts to the last committed value); a value of 0 removes the item,
+  // matching the previous "-" button's behavior when it reached zero.
+  const handleAmountCommit = (ingredientId: string, unit: SupportedUnit | string) => {
+    const raw = editingAmounts[ingredientId];
+    setEditingAmounts((prev) => {
+      const next = { ...prev };
+      delete next[ingredientId];
+      return next;
+    });
+    if (raw === undefined) return;
 
-    if (newAmount === 0) {
-      handleDelete(ingredientId, e);
-    } else {
-      setExactStock(ingredientId, newAmount, current.unit);
-      refreshStock();
+    const parsed = parseFloat(raw.replace(',', '.'));
+    if (isNaN(parsed) || parsed < 0) return;
+
+    if (parsed === 0) {
+      handleDelete(ingredientId);
+      return;
     }
+
+    setExactStock(ingredientId, parsed, unit);
+    refreshStock();
   };
 
   const handleDelete = (ingredientId: string, e?: React.MouseEvent) => {
@@ -250,9 +266,21 @@ export const StockManager: React.FC<StockManagerProps> = ({ onStockChange }) => 
                 </div>
 
                 <div className="mt-2 flex items-baseline gap-1.5">
-                  <span className="text-lg font-black text-emerald-800">
-                    {item.displayAmount}
-                  </span>
+                  <input
+                    type="number"
+                    step="any"
+                    inputMode="decimal"
+                    value={editingAmounts[item.ingredientId] ?? item.displayAmount}
+                    onChange={(e) => handleAmountInputChange(item.ingredientId, e.target.value)}
+                    onBlur={() => handleAmountCommit(item.ingredientId, item.unit)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        (e.target as HTMLInputElement).blur();
+                      }
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-20 px-2 py-1 rounded-xl border border-stone-200 text-lg font-black text-emerald-800 text-right focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-hidden"
+                  />
                   <span className="text-xs font-bold text-stone-600">
                     {item.displayUnit}
                   </span>
@@ -268,26 +296,8 @@ export const StockManager: React.FC<StockManagerProps> = ({ onStockChange }) => 
               <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
                 <button
                   type="button"
-                  onClick={(e) => handleQuickAdjust(item.ingredientId, -1, e)}
-                  className="w-8 h-8 rounded-xl bg-stone-100 text-stone-700 font-bold hover:bg-stone-200 flex items-center justify-center text-sm transition cursor-pointer"
-                  title="Azalt"
-                  id={`stock-decrease-${item.ingredientId}`}
-                >
-                  -
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => handleQuickAdjust(item.ingredientId, 1, e)}
-                  className="w-8 h-8 rounded-xl bg-stone-100 text-stone-700 font-bold hover:bg-stone-200 flex items-center justify-center text-sm transition cursor-pointer"
-                  title="Arttır"
-                  id={`stock-increase-${item.ingredientId}`}
-                >
-                  +
-                </button>
-                <button
-                  type="button"
                   onClick={(e) => handleDelete(item.ingredientId, e)}
-                  className="w-8 h-8 rounded-xl text-stone-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition ml-1 cursor-pointer"
+                  className="w-8 h-8 rounded-xl text-stone-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition cursor-pointer"
                   title="Kiler Stoğundan Kaldır"
                   id={`stock-delete-${item.ingredientId}`}
                 >

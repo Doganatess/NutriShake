@@ -433,7 +433,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
                 <div className="mt-2.5 pt-2 border-t border-stone-200/60 flex flex-wrap gap-1.5">
                   {shake.ingredients.map((ingItem, idx) => {
                     const ing = INGREDIENT_MAP[ingItem.ingredientId];
-                    const isLiquid = ing?.category === 'dairy' || ing?.shakeCompatibility === 'liquid';
+                    const isLiquid = ing?.shakeCompatibility === 'liquid';
                     const unitLabel = isLiquid ? 'ml' : 'g';
                     return (
                       <span
@@ -515,7 +515,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
                 <div className="mt-2.5 pt-2 border-t border-stone-200/60 flex flex-wrap gap-1.5">
                   {shake.ingredients.map((ingItem, idx) => {
                     const ing = INGREDIENT_MAP[ingItem.ingredientId];
-                    const isLiquid = ing?.category === 'dairy' || ing?.shakeCompatibility === 'liquid';
+                    const isLiquid = ing?.shakeCompatibility === 'liquid';
                     const unitLabel = isLiquid ? 'ml' : 'g';
                     return (
                       <span

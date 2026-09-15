@@ -100,7 +100,11 @@ export const StockManager: React.FC<StockManagerProps> = ({ onStockChange }) => 
     setSelectedIngredientId(id);
     const ing = INGREDIENT_MAP[id];
     if (ing) {
-      if (ing.category === 'dairy' || ing.id === 'other_water') {
+      // FIX: previously only checked `category === 'dairy' || id === 'other_water'`,
+      // which missed 'other_mineral_water' (Sade Maden Suyu) entirely — it fell through
+      // to the generic 'g' default. Also wrongly treated yogurts (dairy but thick/'base',
+      // not pourable) the same as milk. Now uses the ingredient's own liquid flag.
+      if (ing.shakeCompatibility === 'liquid') {
         setSelectedUnit('L');
         setInputAmount('1');
       } else if (ing.category === 'grains' || ing.category === 'sweeteners') {
@@ -272,7 +276,7 @@ export const StockManager: React.FC<StockManagerProps> = ({ onStockChange }) => 
                     inputMode="decimal"
                     value={editingAmounts[item.ingredientId] ?? item.displayAmount}
                     onChange={(e) => handleAmountInputChange(item.ingredientId, e.target.value)}
-                    onBlur={() => handleAmountCommit(item.ingredientId, item.unit)}
+                    onBlur={() => handleAmountCommit(item.ingredientId, item.displayUnit)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         (e.target as HTMLInputElement).blur();
@@ -286,7 +290,7 @@ export const StockManager: React.FC<StockManagerProps> = ({ onStockChange }) => 
                   </span>
                   {item.unit !== 'g' && item.unit !== 'ml' && (
                     <span className="text-[10px] text-stone-400 ml-1">
-                      (~{Math.round(item.normalizedGramsOrMl)}{item.ing?.category === 'dairy' ? 'ml' : 'g'})
+                      (~{Math.round(item.normalizedGramsOrMl)}{item.ing?.shakeCompatibility === 'liquid' ? 'ml' : 'g'})
                     </span>
                   )}
                 </div>
@@ -407,16 +411,25 @@ export const StockManager: React.FC<StockManagerProps> = ({ onStockChange }) => 
                     onChange={(e) => setSelectedUnit(e.target.value as SupportedUnit)}
                     className="w-full px-3 py-2.5 rounded-2xl border border-stone-200 text-xs font-bold focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-hidden bg-white"
                   >
-                    <option value="adet">adet</option>
-                    <option value="kg">kg</option>
-                    <option value="g">g (gram)</option>
-                    <option value="L">L (Litre)</option>
-                    <option value="ml">ml</option>
-                    <option value="yemek kaşığı">yemek kaşığı</option>
-                    <option value="tatlı kaşığı">tatlı kaşığı</option>
-                    <option value="çay kaşığı">çay kaşığı</option>
-                    <option value="porsiyon">porsiyon</option>
-                    <option value="dilim">dilim</option>
+                    {selectedIngredient?.shakeCompatibility === 'liquid' ? (
+                      // FIX: liquids (milk, water, mineral water) must never be entered
+                      // in g/kg — restrict to ml/L only so this can't be picked by mistake.
+                      <>
+                        <option value="L">L (Litre)</option>
+                        <option value="ml">ml</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="adet">adet</option>
+                        <option value="kg">kg</option>
+                        <option value="g">g (gram)</option>
+                        <option value="yemek kaşığı">yemek kaşığı</option>
+                        <option value="tatlı kaşığı">tatlı kaşığı</option>
+                        <option value="çay kaşığı">çay kaşığı</option>
+                        <option value="porsiyon">porsiyon</option>
+                        <option value="dilim">dilim</option>
+                      </>
+                    )}
                   </select>
                 </div>
               </div>

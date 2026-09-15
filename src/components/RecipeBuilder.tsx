@@ -123,7 +123,7 @@ export const RecipeBuilder: React.FC<RecipeBuilderProps> = ({
     const newIds = [...selectedIngredientIds, ing.id];
     setSelectedIngredientIds(newIds);
 
-    const defaultUnit = ing.defaultServingUnit || (ing.category === 'dairy' ? 'ml' : 'g');
+    const defaultUnit = ing.defaultServingUnit || (ing.shakeCompatibility === 'liquid' ? 'ml' : 'g');
     const defaultAmount = ing.defaultServing || 50;
 
     setRecipeItems((prev) => [

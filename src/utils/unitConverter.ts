@@ -99,10 +99,13 @@ export function formatNormalizedUnit(
     return { display: '0 g', amount: 0, unit: 'g' };
   }
 
-  const isLiquid =
-    ingredient?.shakeCompatibility === 'liquid' ||
-    ingredient?.category === 'dairy' ||
-    ingredient?.category === 'others';
+  // FIX: previously used `ingredient?.category === 'dairy' || category === 'others'` as
+  // the liquid proxy. This was wrong in both directions: yogurts (category 'dairy' but
+  // shakeCompatibility 'base' — thick, not pourable) were shown in L/ml when they should
+  // be g/kg, and 'others' items other than water could be non-liquid. The ingredient data
+  // already flags true pourable liquids explicitly via shakeCompatibility === 'liquid'
+  // (milk, water, mineral water) — use that as the single source of truth.
+  const isLiquid = ingredient?.shakeCompatibility === 'liquid';
 
   // If ingredient is a fruit and has an edibleWeight, check if displaying as 'adet' makes sense
   if (

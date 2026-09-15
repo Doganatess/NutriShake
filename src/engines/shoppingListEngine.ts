@@ -90,7 +90,7 @@ export function generateShoppingList(
 
   const shoppingList: ShoppingItem[] = Object.entries(aggregatedMap).map(([id, data]) => {
     const ing = INGREDIENT_MAP[id];
-    const isLiquid = ing?.shakeCompatibility === 'liquid' || ing?.category === 'dairy';
+    const isLiquid = ing?.shakeCompatibility === 'liquid';
     const displayQuantity = formatRetailQuantity(data.totalGrams, !!isLiquid);
     const grams = Math.round(data.totalGrams);
 

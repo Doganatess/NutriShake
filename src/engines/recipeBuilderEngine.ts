@@ -151,7 +151,7 @@ export function adjustRecipeToTargetCalories(
       ...item,
       amount: initialGrams,
       quantity: initialGrams,
-      unit: ing?.category === 'dairy' ? 'ml' : 'g',
+      unit: ing?.shakeCompatibility === 'liquid' ? 'ml' : 'g',
       bounds,
     };
   });

@@ -292,20 +292,21 @@ export interface AnalyzeMealRequest {
 export async function analyzeMealWithVision(req: AnalyzeMealRequest) {
   const ai = getAiClient();
 
-  const prompt = `Sen uzman bir klinik diyetisyen ve beslenme analistisin. Fotoğraftaki öğünü, bir gıda etiketi hazırlıyormuş titizliğinde analiz et.
+  const prompt = `Sen uzman bir klinik diyetisyen ve beslenme analistisin.
+Gelen fotoğraftaki yemeği/öğünü dikkatle incele.
 Kullanıcının belirttiği öğün adı: "${req.mealName || 'Öğün'}".
 Ek kullanıcı notu: "${req.userNotes || 'Belirtilmemiş'}".
 
-ADIM ADIM ÇALIŞMA YÖNTEMİ:
-1. TESPİT: Tabaktaki/bardaktaki/masadaki HER ŞEYİ tek tek listele — ana yemek, garnitür, salata, sos/dressing, ekmek, içecek, tatlı, süsleme (maydanoz, susam vb.) dahil. Küçük veya arka planda kalan öğeleri de atlama.
-2. ÖLÇEK REFERANSI: Tabak/bardak/çatal-kaşık gibi görünen nesnelerin standart boyutlarını (ör. yemek tabağı ~26-28cm çap, yemek kaşığı ~15ml, çay bardağı ~200ml) referans alarak her öğe için GRAM/ML cinsinden somut bir ağırlık tahmini yap — sadece "1 porsiyon" gibi belirsiz ifadelerle yetinme, mutlaka bir sayı ver (ör. "~180g").
-3. PİŞİRME YÖNTEMİ: Her ana öğe için pişirme şeklini (kızartma, haşlama, ızgara, fırın, çiğ) belirle; kızartmada emilen gizli yağı hesaba kat.
-4. MAKRO HESABI: Her öğe için ayrı ayrı kalori, protein, karbonhidrat, yağ ve lif gramını tahmin et, sonra bunları topla — toplamı öğe bazlı tahminlerle tutarlı olsun.
-5. BELİRSİZLİK: Fotoğraftan porsiyon ve gizli yağlar (sos, sıvı yağ) tam bilinemez. ASLA kesin konuşma, her zaman "TAHMİNİ" değer ver ve toplam için hem minimum-maksimum aralığı hem ortalama merkezi değeri belirle.
-6. GÜVEN SEVİYESİ: Emin olmadığın veya net görünmeyen yiyecekleri uydurma! Her öğe ve genel öğün için güven seviyesini "low", "medium" veya "high" olarak belirt ve notlara açıklama düş (Örn: "Sosun içeriği net seçilemediğinden kalori aralığı geniş tutulmuştur").
+GÖREVLER:
+1. Tabaktaki/masadaki yiyecekleri tespit et — ana yemek, garnitür, sos, ekmek, içecek dahil her şeyi say.
+2. Fotoğraftaki porsiyonları, tabak ölçeğini ve pişirme şeklini (kızartma, haşlama, ızgara vb.) profesyonelce tahmin et; mümkünse gram cinsinden somut bir ağırlık belirt.
+3. KESİN OLAN VE OLMAYAN AYRIMINI YAP: Fotoğraftan porsiyon ve gizli yağlar (sos, sıvı yağ) tam bilinemez. Bu nedenle ASLA kesin konuşma, her zaman "TAHMİNİ" değer ver.
+4. Toplam kalori için hem minimum-maksimum aralığı (örneğin 650-800) hem de ortalama merkezi değeri belirle.
+5. Makro tahminlerini (protein, karbonhidrat, yağ, lif gramları) hesapla.
+6. Emin olmadığın veya net görünmeyen yiyecekleri uydurma! Güven seviyesini "low", "medium" veya "high" olarak belirt ve notlara açıklama düş (Örn: "Sosun içeriği net seçilemediğinden kalori aralığı geniş tutulmuştur").
 7. Türkçe, nazik ve bilgilendirici bir özet sun.
 
-Aşağıdaki JSON şemasına harfiyen uygun, hiçbir alanı atlamadan bir JSON yanıtı ver.`;
+Aşağıdaki JSON şemasına harfiyen uygun bir JSON yanıtı ver.`;
 
   return withRetry(async () => {
     return await callWithModelFallback(async (model) => {
@@ -333,13 +334,11 @@ Aşağıdaki JSON şemasına harfiyen uygun, hiçbir alanı atlamadan bir JSON y
                   type: Type.OBJECT,
                   properties: {
                     name: { type: Type.STRING, description: 'Yiyecek adı (Örn: Izgara Tavuk Göğsü)' },
-                    portion: { type: Type.STRING, description: 'Tahmini porsiyon açıklaması (Örn: "1 porsiyon, orta boy")' },
-                    estimatedGrams: { type: Type.INTEGER, description: 'Bu öğenin tahmini ağırlığı, gram veya ml cinsinden somut bir sayı (Örn: 180)' },
+                    portion: { type: Type.STRING, description: 'Tahmini porsiyon (Örn: ~150g, 1 porsiyon)' },
                     estimatedCalories: { type: Type.INTEGER, description: 'Yaklaşık kcal' },
                     protein: { type: Type.NUMBER, description: 'Protein (g)' },
                     carbs: { type: Type.NUMBER, description: 'Karbonhidrat (g)' },
                     fat: { type: Type.NUMBER, description: 'Yağ (g)' },
-                    fiber: { type: Type.NUMBER, description: 'Lif (g)' },
                     confidence: {
                       type: Type.STRING,
                       enum: ['low', 'medium', 'high'],
@@ -347,7 +346,7 @@ Aşağıdaki JSON şemasına harfiyen uygun, hiçbir alanı atlamadan bir JSON y
                     },
                     note: { type: Type.STRING, description: 'Pişirme veya porsiyon notu' },
                   },
-                  required: ['name', 'portion', 'estimatedGrams', 'estimatedCalories', 'protein', 'carbs', 'fat', 'fiber', 'confidence'],
+                  required: ['name', 'portion', 'estimatedCalories', 'protein', 'carbs', 'fat', 'confidence'],
                 },
               },
               calorieMin: { type: Type.INTEGER, description: 'Tahmini minimum kcal (Örn: 650)' },
@@ -356,8 +355,6 @@ Aşağıdaki JSON şemasına harfiyen uygun, hiçbir alanı atlamadan bir JSON y
               protein: { type: Type.NUMBER, description: 'Toplam protein (g)' },
               carbs: { type: Type.NUMBER, description: 'Toplam karbonhidrat (g)' },
               fat: { type: Type.NUMBER, description: 'Toplam yağ (g)' },
-              fiber: { type: Type.NUMBER, description: 'Toplam lif (g)' },
-              totalEstimatedGrams: { type: Type.INTEGER, description: 'Tüm öğünün toplam tahmini ağırlığı (g)' },
               confidence: {
                 type: Type.STRING,
                 enum: ['low', 'medium', 'high'],
@@ -374,7 +371,6 @@ Aşağıdaki JSON şemasına harfiyen uygun, hiçbir alanı atlamadan bir JSON y
               'protein',
               'carbs',
               'fat',
-              'fiber',
               'confidence',
               'cookingStyleNotes',
               'analysisSummary',

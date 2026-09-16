@@ -1,15 +1,15 @@
 import { GoogleGenAI, Type } from '@google/genai';
-import { INGREDIENTS_DATABASE, INGREDIENT_MAP } from '../data/ingredients';
-import { calculateShakeNutrition } from '../utils/nutritionEngine';
+import { INGREDIENTS_DATABASE, INGREDIENT_MAP } from '../data/ingredients.js';
+import { calculateShakeNutrition } from '../utils/nutritionEngine.js';
 import {
   validateAndSanitizeShake,
   getRecipeFingerprint,
   calculateRecipeSimilarity,
-} from '../utils/recipeValidator';
-import { PortionPreference, Shake, DailyPlan } from '../types';
-import { composeThreeDistinctDailyShakes, composeDeterministicShake } from '../engines/recipeCompositionEngine';
-import { getAvailableStockGrams, calculatePantryShakeCalorieCapacity } from '../engines/stockEngine';
-import { DAILY_TARGET_KCAL, CALORIE_TOLERANCE_KCAL } from '../constants/calorieTargets';
+} from '../utils/recipeValidator.js';
+import { PortionPreference, Shake, DailyPlan } from '../types.js';
+import { composeThreeDistinctDailyShakes, composeDeterministicShake } from '../engines/recipeCompositionEngine.js';
+import { getAvailableStockGrams, calculatePantryShakeCalorieCapacity } from '../engines/stockEngine.js';
+import { DAILY_TARGET_KCAL, CALORIE_TOLERANCE_KCAL } from '../constants/calorieTargets.js';
 
 let aiClient: GoogleGenAI | null = null;
 

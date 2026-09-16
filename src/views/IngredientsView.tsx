@@ -80,7 +80,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     }
 
     return list;
-  }, [searchQuery, selectedCategory, statusFilter, ingredientStates]);
+  }, [searchQuery, selectedCategory, selectedSweetenerSubCategory, statusFilter, ingredientStates]);
 
   const handleSetState = (ingredientId: string, state: IngredientState) => {
     const updated = {

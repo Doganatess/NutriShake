@@ -154,22 +154,34 @@ export const TodayView: React.FC<TodayViewProps> = ({
   };
 
   // User picks which of the 3 generated candidates is today's actual shake.
+  // FIX: previously only set selectedShakeId (hiding the other 2 in TodayView), but
+  // plan.shakes still contained all 3 — so PlanView (the "Plan" tab) kept showing the
+  // unselected alternatives too. Now the unselected candidates are actually removed
+  // from the plan; only the chosen one remains, in both tabs.
   const handleSelectShake = (shakeId: string) => {
     if (!plan) return;
+    const chosen = plan.shakes.find((s) => s.id === shakeId);
+    if (!chosen) return;
     const updatedPlan: DailyPlan = {
       ...plan,
-      selectedShakeId: shakeId,
+      shakes: [chosen],
+      selectedShakeId: chosen.id,
       updatedAt: new Date().toISOString(),
     };
     saveDailyPlan(updatedPlan);
     onRefreshData();
   };
 
-  // Lets the user go back and pick a different one of the 3 candidates.
+  // Lets the user go back and pick a different one of the original candidates.
+  // Restores the full candidate list (from candidateShakes) so they can choose again.
   const handleChangeSelection = () => {
     if (!plan) return;
+    const restoredShakes = plan.candidateShakes && plan.candidateShakes.length > 1
+      ? plan.candidateShakes
+      : plan.shakes;
     const updatedPlan: DailyPlan = {
       ...plan,
+      shakes: restoredShakes,
       selectedShakeId: undefined,
       updatedAt: new Date().toISOString(),
     };
@@ -479,7 +491,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
                 </h3>
               </div>
               <div className="flex items-center gap-3">
-                {plan.shakes.length > 1 && (
+                {plan.candidateShakes && plan.candidateShakes.length > 1 && (
                   <button
                     onClick={handleChangeSelection}
                     className="text-xs text-stone-500 font-semibold hover:underline"

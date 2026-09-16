@@ -535,7 +535,11 @@ export const PlanView: React.FC<PlanViewProps> = ({
             /* Shake Cards List */
             <div className="space-y-4">
               <div className="flex items-center justify-between text-xs text-stone-600 px-1">
-                <span className="font-semibold">Günün Tarifleri ({plan.shakes.length} Farklı Seçenek)</span>
+                <span className="font-semibold">
+                  {plan.selectedShakeId
+                    ? 'Bugün İçin Seçilen Shake'
+                    : `Günün Tarifleri (${plan.shakes.length} Farklı Seçenek)`}
+                </span>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => setActiveTab('builder')}
@@ -556,11 +560,15 @@ export const PlanView: React.FC<PlanViewProps> = ({
                 </div>
               </div>
 
-              {plan.shakes.length < 3 && (
+              {/* FIX: previously checked plan.shakes.length (which is now pruned down to 1
+                  once the user selects a shake in "Bugün"), so this pantry-limitation
+                  warning incorrectly reappeared after every selection. Now checks the
+                  original candidate count instead. */}
+              {!plan.selectedShakeId && (plan.candidateShakes?.length ?? plan.shakes.length) < 3 && (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl text-amber-900 text-xs flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 text-amber-700 shrink-0" />
                   <span>
-                    Kiler stoğunuzdaki çeşitlilik nedeniyle {plan.shakes.length} geçerli tarif üretildi. Stok dışı uydurma malzeme eklenmemiştir.
+                    Kiler stoğunuzdaki çeşitlilik nedeniyle {plan.candidateShakes?.length ?? plan.shakes.length} geçerli tarif üretildi. Stok dışı uydurma malzeme eklenmemiştir.
                   </span>
                 </div>
               )}

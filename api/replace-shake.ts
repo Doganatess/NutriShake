@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
-import { replaceSingleShake } from '../src/server/geminiService';
-import { DAILY_TARGET_KCAL } from '../src/constants/calorieTargets';
+import { replaceSingleShake } from '../src/server/geminiService.js';
+import { DAILY_TARGET_KCAL } from '../src/constants/calorieTargets.js';
 
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') {

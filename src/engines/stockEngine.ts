@@ -4,15 +4,15 @@ import {
   SupportedUnit,
   Shake,
   ShoppingItem,
-} from '../types';
-import { INGREDIENT_MAP, canonicalIngredientId } from '../data/ingredients';
-import { normalizeToGramsOrMl, formatNormalizedUnit } from '../utils/unitConverter';
+} from '../types.js';
+import { INGREDIENT_MAP, canonicalIngredientId } from '../data/ingredients.js';
+import { normalizeToGramsOrMl, formatNormalizedUnit } from '../utils/unitConverter.js';
 import {
   getStoredStock,
   saveStoredStock,
   getStoredStockTransactions,
   saveStockTransaction,
-} from '../storage/storageAbstraction';
+} from '../storage/storageAbstraction.js';
 
 /**
  * Resolves the ACTUAL key under which an ingredient is stored in the stock object,
@@ -214,6 +214,10 @@ export function validateRecipeStock(
   const stock = customStock || getStoredStock();
 
   for (const item of ingredients) {
+    // Tap water is a free kitchen utility, not a tracked pantry item — never flag it
+    // as missing/insufficient stock (see recipeValidator.ts's matching exemption).
+    if (canonicalIngredientId(item.ingredientId) === 'other_water') continue;
+
     const available = getAvailableStockGrams(stock, item.ingredientId);
     const needed = item.amount || 0;
 

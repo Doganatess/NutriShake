@@ -1,5 +1,5 @@
-import { Ingredient, ShakeIngredient } from '../types';
-import { INGREDIENT_MAP } from '../data/ingredients';
+import { Ingredient, ShakeIngredient } from '../types.js';
+import { INGREDIENT_MAP } from '../data/ingredients.js';
 
 export interface CompatibilityReport {
   score: number; // 0 to 100

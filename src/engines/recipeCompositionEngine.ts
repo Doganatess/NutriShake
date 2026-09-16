@@ -4,27 +4,27 @@ import {
   ShakeTiming,
   UserProfile,
   Ingredient,
-} from '../types';
-import { INGREDIENT_MAP, INGREDIENTS_DATABASE, canonicalIngredientId } from '../data/ingredients';
-import { calculateShakeNutrition } from '../utils/nutritionEngine';
-import { DAILY_TARGET_KCAL } from '../constants/calorieTargets';
+} from '../types.js';
+import { INGREDIENT_MAP, INGREDIENTS_DATABASE, canonicalIngredientId } from '../data/ingredients.js';
+import { calculateShakeNutrition } from '../utils/nutritionEngine.js';
+import { DAILY_TARGET_KCAL } from '../constants/calorieTargets.js';
 import {
   getStoredStock,
   getStoredDislikedShakes,
   getStoredFavorites,
   getWeeklyRecommendedSignatures,
   saveWeeklyRecommendedSignature,
-} from '../storage/storageAbstraction';
-import { analyzeCompatibility } from './compatibilityEngine';
-import { formatNormalizedUnit, normalizeToGramsOrMl } from '../utils/unitConverter';
+} from '../storage/storageAbstraction.js';
+import { analyzeCompatibility } from './compatibilityEngine.js';
+import { formatNormalizedUnit, normalizeToGramsOrMl } from '../utils/unitConverter.js';
 import {
   validateMasterRecipe,
   getRecipeFingerprint,
   calculateRecipeSimilarity,
   countDifferingIngredients,
   ALLOWED_DAIRY_CANONICAL_IDS,
-} from '../utils/recipeValidator';
-import { calculatePantryShakeCalorieCapacity, getAvailableStockGrams } from './stockEngine';
+} from '../utils/recipeValidator.js';
+import { calculatePantryShakeCalorieCapacity, getAvailableStockGrams } from './stockEngine.js';
 
 export interface ComposeOptions {
   targetCalories?: number;

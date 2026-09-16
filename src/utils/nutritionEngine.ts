@@ -1,6 +1,6 @@
-import { INGREDIENT_MAP, normalizeTurkish } from '../data/ingredients';
-import { normalizeQuantityToGrams } from './unitConverter';
-import { ShakeIngredient, DailyPlan, MealAnalysis, UserProfile, DailyNutritionSummary } from '../types';
+import { INGREDIENT_MAP, normalizeTurkish } from '../data/ingredients.js';
+import { normalizeQuantityToGrams } from './unitConverter.js';
+import { ShakeIngredient, DailyPlan, MealAnalysis, UserProfile, DailyNutritionSummary } from '../types.js';
 
 /**
  * Normalizes Turkish characters and lowercases for accurate instant search.

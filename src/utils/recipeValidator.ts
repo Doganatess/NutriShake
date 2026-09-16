@@ -1,13 +1,13 @@
-import { INGREDIENT_MAP, canonicalIngredientId } from '../data/ingredients';
-import { calculateShakeNutrition } from './nutritionEngine';
-import { Shake, ShakeIngredient, PortionPreference, StockItem } from '../types';
-import { getWeeklyRecommendedSignatures, getStoredStock } from '../storage/storageAbstraction';
+import { INGREDIENT_MAP, canonicalIngredientId } from '../data/ingredients.js';
+import { calculateShakeNutrition } from './nutritionEngine.js';
+import { Shake, ShakeIngredient, PortionPreference, StockItem } from '../types.js';
+import { getWeeklyRecommendedSignatures, getStoredStock } from '../storage/storageAbstraction.js';
 import {
   getAvailableStockGrams,
   validateRecipeStock,
   calculatePantryShakeCalorieCapacity,
-} from '../engines/stockEngine';
-import { CALORIE_TOLERANCE_KCAL } from '../constants/calorieTargets';
+} from '../engines/stockEngine.js';
+import { CALORIE_TOLERANCE_KCAL } from '../constants/calorieTargets.js';
 
 export interface RecipeValidationOptions {
   forbiddenIngredientIds?: string[];

@@ -1,4 +1,4 @@
-import { Ingredient, SupportedUnit } from '../types';
+import { Ingredient, SupportedUnit } from '../types.js';
 
 /**
  * Standard unit normalization:

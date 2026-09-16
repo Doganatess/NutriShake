@@ -1,13 +1,13 @@
-import { Ingredient, IngredientCategory } from '../../types';
-import { FRUITS } from './fruits';
-import { DRIED_FRUITS } from './driedFruits';
-import { DAIRY } from './dairy';
-import { GRAINS } from './grains';
-import { SWEETENERS } from './sweeteners';
-import { COCOA_EXTRAS } from './cocoaExtras';
-import { NUTS } from './nuts';
-import { OTHERS } from './others';
-import { normalizeTurkish, searchIngredients as baseSearchIngredients } from '../../utils/turkishSearch';
+import { Ingredient, IngredientCategory } from '../../types.js';
+import { FRUITS } from './fruits.js';
+import { DRIED_FRUITS } from './driedFruits.js';
+import { DAIRY } from './dairy.js';
+import { GRAINS } from './grains.js';
+import { SWEETENERS } from './sweeteners.js';
+import { COCOA_EXTRAS } from './cocoaExtras.js';
+import { NUTS } from './nuts.js';
+import { OTHERS } from './others.js';
+import { normalizeTurkish, searchIngredients as baseSearchIngredients } from '../../utils/turkishSearch.js';
 
 export { normalizeTurkish };
 

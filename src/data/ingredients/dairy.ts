@@ -1,4 +1,4 @@
-import { Ingredient } from '../../types';
+import { Ingredient } from '../../types.js';
 
 /**
  * Strict Dairy Category (SADECE bu 4 ürün olmalıdır):

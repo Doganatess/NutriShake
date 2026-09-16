@@ -12,7 +12,7 @@ import {
   StockTransaction,
   ShiftSchedule,
   ShiftType,
-} from '../types';
+} from '../types.js';
 
 export const CURRENT_SCHEMA_VERSION = 2;
 

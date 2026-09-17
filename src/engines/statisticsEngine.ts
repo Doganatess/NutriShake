@@ -1,5 +1,61 @@
-import { DailyPlan, MealAnalysis, WeightEntry, UserProfile, NutritionStats, Shake } from '../types';
-import { INGREDIENT_MAP } from '../data/ingredients';
+import { DailyPlan, MealAnalysis, WeightEntry, UserProfile, NutritionStats, Shake } from '../types.js';
+import { INGREDIENT_MAP, canonicalIngredientId } from '../data/ingredients.js';
+
+export interface IngredientAffinity {
+  ingredientId: string;
+  name: string;
+  icon: string;
+  score: number; // how many times this ingredient appeared in a favorited or love/like-rated shake
+}
+
+/**
+ * Learns which ingredients the user actually enjoys, from two signals they've already
+ * given us: shakes they explicitly favorited (heart icon), and shakes they rated
+ * "love" or "like" (❤️/👍) in a past daily plan. Counts how often each canonical
+ * ingredient appears across those shakes — a higher count means it shows up in more
+ * things the user has liked, not just once.
+ *
+ * Used two ways:
+ * 1. Silently: recipeCompositionEngine.ts nudges ingredient selection toward these
+ *    when building new shakes (client-side deterministic path).
+ * 2. Visibly: SettingsView.tsx shows the top ones as "En Çok Sevdiklerin".
+ */
+export function getIngredientAffinityScores(
+  favorites: Shake[],
+  plans: Record<string, DailyPlan>
+): IngredientAffinity[] {
+  const counts = new Map<string, number>();
+
+  const countShakeIngredients = (shake: Shake) => {
+    for (const item of shake.ingredients) {
+      const canonId = canonicalIngredientId(item.ingredientId);
+      if (canonId === 'other_water') continue; // water isn't a "taste preference"
+      counts.set(canonId, (counts.get(canonId) || 0) + 1);
+    }
+  };
+
+  favorites.forEach(countShakeIngredients);
+
+  Object.values(plans).forEach((plan) => {
+    plan.shakes?.forEach((shake) => {
+      if (shake.rating === 'love' || shake.rating === 'like') {
+        countShakeIngredients(shake);
+      }
+    });
+  });
+
+  return Array.from(counts.entries())
+    .map(([ingredientId, score]) => {
+      const ing = INGREDIENT_MAP[ingredientId];
+      return {
+        ingredientId,
+        name: ing?.name || ingredientId,
+        icon: ing?.icon || '🥣',
+        score,
+      };
+    })
+    .sort((a, b) => b.score - a.score);
+}
 
 /**
  * Statistics Engine (Requirement 32)

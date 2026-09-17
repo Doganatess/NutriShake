@@ -12,9 +12,11 @@ import {
   getStoredStock,
   getStoredDislikedShakes,
   getStoredFavorites,
+  getStoredDailyPlans,
   getWeeklyRecommendedSignatures,
   saveWeeklyRecommendedSignature,
 } from '../storage/storageAbstraction.js';
+import { getIngredientAffinityScores } from './statisticsEngine.js';
 import { analyzeCompatibility } from './compatibilityEngine.js';
 import { formatNormalizedUnit, normalizeToGramsOrMl } from '../utils/unitConverter.js';
 import {
@@ -587,12 +589,31 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
     const avail = availableStock(id);
     return avail > 0 && avail <= LOW_STOCK_THRESHOLD_G ? 1 : 0;
   };
+  // Learned taste preference: ingredients that show up often in the user's favorited
+  // or love/like-rated shakes get a gentle nudge in ingredient selection. This only has
+  // data to work with in the browser (favorites/ratings live in localStorage, which the
+  // server-side AI-generation path can't see) — getStoredFavorites/getStoredDailyPlans
+  // already fall back to empty data safely server-side, so affinityScore is just always
+  // 0 there and this tier has no effect, no guard needed.
+  const affinityScores = (() => {
+    try {
+      const favorites = getStoredFavorites();
+      const plans = getStoredDailyPlans();
+      const scores = getIngredientAffinityScores(favorites, plans);
+      return new Map(scores.map((s) => [s.ingredientId, s.score]));
+    } catch {
+      return new Map<string, number>();
+    }
+  })();
+  const affinityScore = (id: string) => affinityScores.get(canonicalIngredientId(id)) || 0;
   const sortPool = (list: Ingredient[]) => {
     return list.slice().sort((a, b) => {
       const mandDiff = isMandatory(b.id) - isMandatory(a.id);
       if (mandDiff !== 0) return mandDiff;
       const lowStockDiff = isRunningLow(b.id) - isRunningLow(a.id);
       if (lowStockDiff !== 0) return lowStockDiff;
+      const affinityDiff = affinityScore(b.id) - affinityScore(a.id);
+      if (affinityDiff !== 0) return affinityDiff;
       return getIngredientCostPerKcal(a) - getIngredientCostPerKcal(b);
     });
   };
@@ -737,6 +758,18 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
     );
   }
 
+  // FIX: `excludedShakeNames` (disliked shakes / the shake currently being replaced) was
+  // declared on the options interface and threaded all the way from the UI down to here,
+  // but was never actually read anywhere in this function — a disliked recipe could be
+  // suggested again immediately. Filter it out now (when enough alternatives remain).
+  if (options.excludedShakeNames?.length) {
+    const excludedLower = new Set(options.excludedShakeNames.map((n) => n.trim().toLowerCase()));
+    const nonExcluded = validCandidates.filter((c) => !excludedLower.has(c.name.trim().toLowerCase()));
+    if (nonExcluded.length > 0) {
+      validCandidates = nonExcluded;
+    }
+  }
+
   // FIX: analyzeCompatibility() was already being computed per-shake but its score was
   // only used for a cosmetic "why chosen" text line — it had zero influence on which
   // combos actually got selected, so genuinely bland/clashing-flavor combos could win
@@ -755,6 +788,35 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
     if (cached === undefined) {
       cached = analyzeCompatibility(shake.ingredients).score;
       compatibilityScoreCache.set(shake, cached);
+    }
+    return cached;
+  };
+
+  // NEW: "Favorites-based learning" — recipes similar in composition to shakes the user
+  // has previously favorited (❤️ in the app) get a ranking boost. getStoredFavorites()
+  // was already imported here but never actually called, so favorites had zero effect
+  // on future suggestions despite being tracked in Settings. Only runs client-side
+  // (getStoredFavorites reads localStorage), which matches how it's used elsewhere.
+  const favoriteIngredientSets: ShakeIngredient[][] = (() => {
+    try {
+      const favorites = typeof window !== 'undefined' ? getStoredFavorites() : [];
+      return favorites.map((f) => f.ingredients);
+    } catch {
+      return [];
+    }
+  })();
+  const favoriteSimilarityCache = new Map<Shake, number>();
+  const getFavoriteSimilarity = (shake: Shake): number => {
+    if (favoriteIngredientSets.length === 0) return 0;
+    let cached = favoriteSimilarityCache.get(shake);
+    if (cached === undefined) {
+      cached = Math.max(
+        0,
+        ...favoriteIngredientSets.map((favIngredients) =>
+          calculateRecipeSimilarity(shake.ingredients, favIngredients)
+        )
+      );
+      favoriteSimilarityCache.set(shake, cached);
     }
     return cached;
   };
@@ -779,6 +841,11 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
     const lowStockB = countLowStockIngredientsUsed(b);
     if (lowStockA !== lowStockB) {
       return lowStockB - lowStockA;
+    }
+    // Priority 0.4 (NEW): prefer combos closer to past favorited shakes.
+    const favDiff = getFavoriteSimilarity(b) - getFavoriteSimilarity(a);
+    if (Math.abs(favDiff) > 0.15) {
+      return favDiff;
     }
     // Priority 0.5 (NEW): prefer better flavor/texture compatibility, so combos that
     // clash or taste bland don't win purely on cost.

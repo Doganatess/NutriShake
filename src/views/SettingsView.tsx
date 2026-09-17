@@ -35,8 +35,10 @@ import {
   clearUserOnlyData,
   exportAllUserData,
   importUserData,
+  getStoredDailyPlans,
 } from '../storage/storageAbstraction';
 import { estimateCalorieNeeds } from '../utils/nutritionEngine';
+import { getIngredientAffinityScores } from '../engines/statisticsEngine';
 
 interface SettingsViewProps {
   profile: UserProfile;
@@ -69,6 +71,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // Favorites
   const [favorites, setFavorites] = useState<Shake[]>(getStoredFavorites());
+
+  // Learned ingredient preferences (from favorites + love/like-rated shakes)
+  const topAffinityIngredients = getIngredientAffinityScores(favorites, getStoredDailyPlans())
+    .filter((a) => a.score >= 2)
+    .slice(0, 8);
 
   // Handle Profile Save
   const handleSaveProfile = () => {
@@ -262,15 +269,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             />
           </div>
           <div>
-            <label className="block text-stone-600 font-medium mb-1">Günlük Shake Sayısı</label>
-            <select
-              value={dailyShakeCount}
-              onChange={(e) => setDailyShakeCount(parseInt(e.target.value) || 1)}
-              className="w-full px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 font-semibold"
-            >
-              <option value={1}>Günde 1 Shake (2 Eşit Porsiyon)</option>
-              <option value={2}>Günde 2 Shake</option>
-            </select>
+            <label className="block text-stone-600 font-medium mb-1">Günlük Shake Modeli</label>
+            <div className="w-full px-3 py-2 border border-stone-200 rounded-xl bg-stone-100 font-semibold text-stone-500">
+              1 Shake (2 Eşit Porsiyon)
+            </div>
+          </div>
           </div>
         </div>
 
@@ -389,6 +392,32 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* En Çok Sevdiklerin (Learned Ingredient Preferences) */}
+      {topAffinityIngredients.length > 0 && (
+        <div className="bg-white rounded-3xl p-5 border border-stone-200 shadow-xs space-y-3">
+          <div className="border-b border-stone-100 pb-3">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-emerald-700" />
+              <h3 className="text-sm font-bold text-stone-900">En Çok Sevdiklerin</h3>
+            </div>
+            <p className="text-[11px] text-stone-500 mt-0.5">
+              Favorilediğin ve yüksek puan verdiğin shake'lerde en sık geçen malzemeler. Yeni tarifler oluşturulurken bunlara hafifçe öncelik verilir.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {topAffinityIngredients.map((a) => (
+              <span
+                key={a.ingredientId}
+                className="text-xs bg-emerald-50 border border-emerald-200 text-emerald-900 px-3 py-1.5 rounded-xl font-semibold flex items-center gap-1.5"
+              >
+                <span>{a.icon}</span>
+                <span>{a.name}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 3. Saved Favorites */}
       <div className="bg-white rounded-3xl p-5 border border-stone-200 shadow-xs space-y-3">

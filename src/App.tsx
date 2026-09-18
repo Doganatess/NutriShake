@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Home,
   Sparkles,
@@ -59,6 +59,9 @@ export default function App() {
 
   // Plan Generation state
   const [isGeneratingPlan, setIsGeneratingPlan] = useState<boolean>(false);
+  // Tracks the in-flight plan-generation request so a rapid second click can abort the
+  // stale one instead of letting two responses race to write dailyPlan state.
+  const generatePlanAbortRef = useRef<AbortController | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
 
   // Online / Offline listener
@@ -99,6 +102,14 @@ export default function App() {
   const handleGeneratePlan = async () => {
     if (!profile) return;
 
+    // FIX (race condition): if a generate-plan request is already in flight, don't let
+    // a second rapid click (e.g. mashing "Yeniden Planla") fire another one concurrently.
+    // Abort the stale in-flight request first, since its eventual response should not be
+    // allowed to land after — and possibly overwrite — the newer one's result.
+    if (isGeneratingPlan && generatePlanAbortRef.current) {
+      generatePlanAbortRef.current.abort();
+    }
+
     // FIX: saveDailyPlan() completely overwrites the day's plan object. If the user
     // already drank a portion today (portion1Completed/portion2Completed on any shake,
     // or the plan's completedCalories > 0) and then regenerates, that "already drank"
@@ -116,6 +127,9 @@ export default function App() {
         if (!confirmed) return;
       }
     }
+
+    const abortController = new AbortController();
+    generatePlanAbortRef.current = abortController;
 
     // Dairy Consistency Check
     const stock = getStoredStock();
@@ -182,12 +196,21 @@ export default function App() {
         dislikedShakeNames: disliked,
         favoriteShakeNames: favorites,
         userStock: stock,
-      });
+      }, abortController.signal);
+
+      // A newer request may have aborted and replaced this one while we were waiting;
+      // if so, its own .then/.catch owns writing state now — this stale result must not.
+      if (generatePlanAbortRef.current !== abortController) return;
 
       saveDailyPlan(plan);
       setDailyPlan(plan);
       setActiveTab('plan');
     } catch (err: unknown) {
+      // Intentionally cancelled because a newer request superseded this one — not a
+      // real failure, so no error message and no deterministic fallback.
+      if (err instanceof DOMException && err.name === 'AbortError') return;
+      if (generatePlanAbortRef.current !== abortController) return;
+
       console.warn('AI Plan generation unavailable or offline, generating deterministic plan:', err);
       // Deterministic planning engine fallback
       try {
@@ -200,7 +223,12 @@ export default function App() {
         setGlobalError(msg);
       }
     } finally {
-      setIsGeneratingPlan(false);
+      // Only the still-current request should clear the loading flag — an aborted,
+      // superseded request's finally block must not stomp on the newer one's state.
+      if (generatePlanAbortRef.current === abortController) {
+        setIsGeneratingPlan(false);
+        generatePlanAbortRef.current = null;
+      }
     }
   };
 

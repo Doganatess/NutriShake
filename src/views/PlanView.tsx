@@ -274,6 +274,13 @@ export const PlanView: React.FC<PlanViewProps> = ({
   // Replace Single Shake (Preserves all other shakes & synchronizes dailyShake for Today view)
   const handleReplaceSingleShake = async (shake: Shake) => {
     if (!plan) return;
+
+    // FIX (race condition): only one "Değiştir" (replace) can run at a time. Without
+    // this, clicking replace on two different shakes back-to-back could let both writes
+    // finish out of order — the second saveDailyPlan() would overwrite the plan based on
+    // a stale snapshot from before the first replace landed, silently losing it.
+    if (replacingShakeId !== null) return;
+
     setReplacingShakeId(shake.id);
     setReplaceError(null);
 
@@ -467,7 +474,7 @@ export const PlanView: React.FC<PlanViewProps> = ({
                 Günlük Shake Planı
               </span>
               <span className="text-[11px] text-stone-300">
-                {profile.dailyShakeCount} Shake •{' '}
+                1 Shake (2 Eşit Porsiyon) •{' '}
                 {profile.portionPreference === 'small'
                   ? 'Küçük'
                   : profile.portionPreference === 'large'

@@ -74,6 +74,68 @@ export function normalizeToGramsOrMl(
 }
 
 /**
+ * Reverse of normalizeToGramsOrMl: converts a normalized gram/ml amount back into a
+ * quantity expressed in the given target unit. Used when a user switches an ingredient's
+ * unit in an editor (e.g. "adet" -> "g") — the physical amount should stay the same,
+ * only how it's expressed changes.
+ */
+export function gramsToQuantityInUnit(
+  grams: number,
+  targetUnit: SupportedUnit | string,
+  ingredient?: Ingredient | null
+): number {
+  if (grams <= 0) return 0;
+  const cleanUnit = (targetUnit || 'g').trim().toLowerCase();
+
+  if (ingredient && ingredient.units && ingredient.units.length > 0) {
+    const custom = ingredient.units.find(
+      (u) => u.unit.toLowerCase() === cleanUnit || u.label.toLowerCase() === cleanUnit
+    );
+    if (custom && custom.grams > 0) {
+      return grams / custom.grams;
+    }
+  }
+
+  switch (cleanUnit) {
+    case 'kg':
+      return grams / 1000;
+    case 'l':
+    case 'litre':
+      return grams / 1000;
+    case 'g':
+    case 'gram':
+      return grams;
+    case 'ml':
+    case 'mililitre':
+      return grams;
+    case 'adet':
+    case 'tane':
+      return grams / (ingredient?.edibleWeight || 100);
+    case '1/2 adet':
+    case 'yarım adet':
+      return grams / ((ingredient?.edibleWeight || 100) * 0.5);
+    case '1/4 adet':
+    case 'çeyrek adet':
+      return grams / ((ingredient?.edibleWeight || 100) * 0.25);
+    case 'dilim':
+      return grams / (ingredient?.edibleWeight ? ingredient.edibleWeight * 0.35 : 30);
+    case 'yemek kaşığı':
+    case 'yk':
+      return grams / (ingredient?.category === 'sweeteners' || ingredient?.category === 'dairy' ? 20 : 12);
+    case 'tatlı kaşığı':
+    case 'tk':
+      return grams / (ingredient?.category === 'sweeteners' ? 10 : 6);
+    case 'çay kaşığı':
+    case 'çk':
+      return grams / (ingredient?.category === 'sweeteners' ? 5 : 3);
+    case 'porsiyon':
+      return grams / (ingredient?.defaultServing || 100);
+    default:
+      return grams;
+  }
+}
+
+/**
  * Backward compatibility alias for legacy callers (supports both (amount, unit, ing) and (ing, amount, unit))
  */
 export function normalizeQuantityToGrams(

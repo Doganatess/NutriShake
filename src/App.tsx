@@ -29,7 +29,8 @@ import {
 import { calculateDailyNutrition } from './utils/nutritionEngine';
 import { generateDailyPlanApi } from './services/apiClient';
 import { generateDailyPlan, calculateOptimalDailyShakeKcal } from './engines/planningEngine';
-import { getStoredStock } from './storage/storageAbstraction';
+import { getStoredStock, getStoredDailyPlans } from './storage/storageAbstraction';
+import { getIngredientAffinityScores } from './engines/statisticsEngine';
 import { hasDairyInStock } from './engines/recipeCompositionEngine';
 
 import { TodayView } from './views/TodayView';
@@ -98,6 +99,24 @@ export default function App() {
   const handleGeneratePlan = async () => {
     if (!profile) return;
 
+    // FIX: saveDailyPlan() completely overwrites the day's plan object. If the user
+    // already drank a portion today (portion1Completed/portion2Completed on any shake,
+    // or the plan's completedCalories > 0) and then regenerates, that "already drank"
+    // state silently vanishes from the UI — even though the pantry stock deduction for
+    // it already happened and can't be undone. Warn before wiping it.
+    if (dailyPlan) {
+      const hasProgressToday =
+        (dailyPlan.completedCalories || 0) > 0 ||
+        dailyPlan.shakes?.some((s) => s.portion1Completed || s.portion2Completed) ||
+        dailyPlan.dailyShake?.portions?.some((p) => p.isCompleted);
+      if (hasProgressToday) {
+        const confirmed = window.confirm(
+          'Bugün için zaten en az bir porsiyon "İçildi" olarak işaretlenmiş. Planı yeniden oluşturursan bu ilerleme (kaç porsiyon içtiğin) sıfırlanır — kilerinizden düşülen malzemeler geri gelmez, sadece ekrandaki "içildi" bilgisi kaybolur. Yine de devam etmek istiyor musun?'
+        );
+        if (!confirmed) return;
+      }
+    }
+
     // Dairy Consistency Check
     const stock = getStoredStock();
     if (!hasDairyInStock(stock)) {
@@ -126,6 +145,21 @@ export default function App() {
       const disliked = getStoredDislikedShakes().map((d) => d.name);
       const favorites = getStoredFavorites().map((f) => f.name);
 
+      // Silently learn from favorited / love-rated shakes and nudge the AI prompt
+      // toward the ingredients the user actually keeps enjoying, without them having
+      // to write a manual preference rule for it themselves.
+      const topAffinityIngredients = getIngredientAffinityScores(
+        getStoredFavorites(),
+        getStoredDailyPlans()
+      )
+        .filter((a) => a.score >= 2) // only ingredients that showed up more than once
+        .slice(0, 5)
+        .map((a) => a.name);
+      const learnedPrefs =
+        topAffinityIngredients.length > 0
+          ? [`Kullanıcı geçmişte şu malzemeleri içeren shake'leri belirgin şekilde daha çok beğendi: ${topAffinityIngredients.join(', ')}. Mümkün olduğunda bunlardan birini tarife dahil et.`]
+          : [];
+
       // Optimal daily shake calories calculated by Planning Engine (~800 - 1400 kcal)
       // Main meal calories are independent and NOT subtracted from the shake target
       const optimalShakeKcal = calculateOptimalDailyShakeKcal(profile);
@@ -144,7 +178,7 @@ export default function App() {
         mandatoryIngredientIds: mandatoryIds,
         allowedIngredientIds: allowedIds,
         forbiddenIngredientIds: forbiddenIds,
-        userPreferences: prefs,
+        userPreferences: [...prefs, ...learnedPrefs],
         dislikedShakeNames: disliked,
         favoriteShakeNames: favorites,
         userStock: stock,

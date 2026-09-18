@@ -23,6 +23,7 @@ import { Shake, ShakeIngredient, Ingredient, ShakeRating } from '../types';
 import { INGREDIENT_MAP, INGREDIENTS_DATABASE, searchIngredients } from '../data/ingredients';
 import { calculateShakeNutrition, calculateIngredientNutrition } from '../utils/nutritionEngine';
 import { validateRecipeStock, getStockAmountNormalized } from '../engines/stockEngine';
+import { normalizeToGramsOrMl, gramsToQuantityInUnit } from '../utils/unitConverter';
 
 interface ShakeCardProps {
   shake: Shake;
@@ -154,12 +155,25 @@ export const ShakeCard: React.FC<ShakeCardProps> = ({
   };
 
   // Change unit of an ingredient
+  // FIX: previously only swapped the `unit` label, leaving the numeric quantity
+  // unchanged — switching e.g. "1 adet" (a whole banana, ~100g) to "g" left the value
+  // at "1", silently turning it into "1 gram of banana" and wrecking the nutrition
+  // calculation. Now the quantity is converted to the physically equivalent amount
+  // in the new unit, so the actual amount of food stays the same.
   const handleUnitChange = (idx: number, newUnit: string) => {
     setEditIngredients((prev) => {
       const next = [...prev];
+      const item = next[idx];
+      const ing = INGREDIENT_MAP[item.ingredientId];
+      const oldUnit = item.unit || 'g';
+      const currentQty = item.quantity !== undefined ? item.quantity : item.amount;
+      const grams = normalizeToGramsOrMl(currentQty, oldUnit, ing);
+      const convertedQty = Math.round(gramsToQuantityInUnit(grams, newUnit, ing) * 100) / 100;
       next[idx] = {
-        ...next[idx],
+        ...item,
         unit: newUnit,
+        quantity: convertedQty,
+        amount: convertedQty,
       };
       return next;
     });

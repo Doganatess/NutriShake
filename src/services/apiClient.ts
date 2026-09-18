@@ -51,28 +51,11 @@ export class ApiError extends Error {
   }
 }
 
-export async function chatWithAiApi(
-  message: string,
-  history?: { role: string; text: string }[],
-  context?: any
-): Promise<{ reply: string; provider: string }> {
-  const res = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      message,
-      history,
-      context,
-      requestId: `chat_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-    }),
-  });
+// NOTE: A chatWithAiApi() helper targeting '/api/chat' used to live here, but no
+// screen in the app ever called it and there was no matching api/chat.ts endpoint —
+// it would have thrown a 404 the moment anything tried to use it. Removed as dead code
+// rather than left as a trap for a future feature that silently doesn't exist yet.
 
-  const data = await res.json();
-  if (!res.ok) {
-    throw new ApiError(data.error || 'Asistan yanıt veremedi.', data.detail);
-  }
-  return data;
-}
 
 export async function analyzeMealApi(payload: AnalyzeMealPayload): Promise<Omit<MealAnalysis, 'id' | 'date' | 'mealType' | 'mealName' | 'createdAt'>> {
   const res = await fetch('/api/analyze-meal', {

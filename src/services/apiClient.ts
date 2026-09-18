@@ -57,10 +57,11 @@ export class ApiError extends Error {
 // rather than left as a trap for a future feature that silently doesn't exist yet.
 
 
-export async function analyzeMealApi(payload: AnalyzeMealPayload): Promise<Omit<MealAnalysis, 'id' | 'date' | 'mealType' | 'mealName' | 'createdAt'>> {
+export async function analyzeMealApi(payload: AnalyzeMealPayload, signal?: AbortSignal): Promise<Omit<MealAnalysis, 'id' | 'date' | 'mealType' | 'mealName' | 'createdAt'>> {
   const res = await fetch('/api/analyze-meal', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal,
     body: JSON.stringify({
       ...payload,
       requestId: `meal_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -75,10 +76,11 @@ export async function analyzeMealApi(payload: AnalyzeMealPayload): Promise<Omit<
   return data;
 }
 
-export async function generateDailyPlanApi(payload: GeneratePlanPayload): Promise<DailyPlan> {
+export async function generateDailyPlanApi(payload: GeneratePlanPayload, signal?: AbortSignal): Promise<DailyPlan> {
   const res = await fetch('/api/generate-plan', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal,
     body: JSON.stringify({
       ...payload,
       requestId: `plan_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -93,10 +95,11 @@ export async function generateDailyPlanApi(payload: GeneratePlanPayload): Promis
   return data;
 }
 
-export async function replaceShakeApi(payload: ReplaceShakePayload): Promise<Shake> {
+export async function replaceShakeApi(payload: ReplaceShakePayload, signal?: AbortSignal): Promise<Shake> {
   const res = await fetch('/api/replace-shake', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal,
     body: JSON.stringify({
       ...payload,
       requestId: `rep_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,

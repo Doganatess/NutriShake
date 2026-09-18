@@ -99,6 +99,24 @@ export default function App() {
   const handleGeneratePlan = async () => {
     if (!profile) return;
 
+    // FIX: saveDailyPlan() completely overwrites the day's plan object. If the user
+    // already drank a portion today (portion1Completed/portion2Completed on any shake,
+    // or the plan's completedCalories > 0) and then regenerates, that "already drank"
+    // state silently vanishes from the UI — even though the pantry stock deduction for
+    // it already happened and can't be undone. Warn before wiping it.
+    if (dailyPlan) {
+      const hasProgressToday =
+        (dailyPlan.completedCalories || 0) > 0 ||
+        dailyPlan.shakes?.some((s) => s.portion1Completed || s.portion2Completed) ||
+        dailyPlan.dailyShake?.portions?.some((p) => p.isCompleted);
+      if (hasProgressToday) {
+        const confirmed = window.confirm(
+          'Bugün için zaten en az bir porsiyon "İçildi" olarak işaretlenmiş. Planı yeniden oluşturursan bu ilerleme (kaç porsiyon içtiğin) sıfırlanır — kilerinizden düşülen malzemeler geri gelmez, sadece ekrandaki "içildi" bilgisi kaybolur. Yine de devam etmek istiyor musun?'
+        );
+        if (!confirmed) return;
+      }
+    }
+
     // Dairy Consistency Check
     const stock = getStoredStock();
     if (!hasDairyInStock(stock)) {

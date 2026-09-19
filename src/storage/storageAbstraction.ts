@@ -14,7 +14,64 @@ import {
   ShiftType,
 } from '../types.js';
 
-export const CURRENT_SCHEMA_VERSION = 2;
+export const CURRENT_SCHEMA_VERSION = 3;
+
+
+/**
+ * One-time storage schema migration entry point.
+ *
+ * The app intentionally keeps migrations conservative: unknown/corrupt values are
+ * left untouched so a migration can never destroy user data. Existing records are
+ * upgraded only by adding the current schema version marker.
+ */
+export function initializeStorageSchema(): void {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+
+  try {
+    const rawVersion = localStorage.getItem('nutrishake_schema_version');
+    const currentVersion = Number(rawVersion || 0);
+
+    if (!Number.isFinite(currentVersion) || currentVersion < CURRENT_SCHEMA_VERSION) {
+      const keysToVersion = [
+        STORAGE_KEYS.PROFILE,
+        STORAGE_KEYS.DAILY_PLANS,
+        STORAGE_KEYS.MEALS,
+        STORAGE_KEYS.CUSTOM_RECIPES,
+      ];
+
+      for (const key of keysToVersion) {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+
+        try {
+          const parsed = JSON.parse(raw);
+          if (key === STORAGE_KEYS.PROFILE) {
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              parsed.schemaVersion = CURRENT_SCHEMA_VERSION;
+            }
+          } else if (Array.isArray(parsed)) {
+            for (const item of parsed) {
+              if (item && typeof item === 'object') item.schemaVersion = CURRENT_SCHEMA_VERSION;
+            }
+          } else if (parsed && typeof parsed === 'object') {
+            for (const value of Object.values(parsed)) {
+              if (value && typeof value === 'object') {
+                (value as Record<string, unknown>).schemaVersion = CURRENT_SCHEMA_VERSION;
+              }
+            }
+          }
+          localStorage.setItem(key, JSON.stringify(parsed));
+        } catch {
+          // Preserve unreadable user data rather than overwriting it.
+        }
+      }
+
+      localStorage.setItem(STORAGE_KEYS.SCHEMA_VERSION, String(CURRENT_SCHEMA_VERSION));
+    }
+  } catch (error) {
+    console.warn('[Storage] Schema migration could not complete:', error);
+  }
+}
 
 export const STORAGE_KEYS = {
   SCHEMA_VERSION: 'nutrishake_schema_version',

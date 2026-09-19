@@ -1,10 +1,16 @@
 import type { Request, Response } from 'express';
 import { generateDailyShakePlan, generateDeterministicDailyPlan } from '../src/server/geminiService.js';
 import { DAILY_TARGET_KCAL } from '../src/constants/calorieTargets.js';
+import { checkRateLimit, deduplicateRequest, getRequestClientKey } from '../src/server/aiProvider.js';
 
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const rateKey = getRequestClientKey(req, 'generate-plan');
+  if (!checkRateLimit(rateKey, 20)) {
+    return res.status(429).json({ error: 'Çok fazla plan oluşturma isteği gönderildi. Lütfen biraz sonra tekrar deneyin.' });
   }
 
   let body = req.body;
@@ -54,7 +60,8 @@ export default async function handler(req: Request, res: Response) {
   };
 
   try {
-    const plan = await generateDailyShakePlan(planParams);
+    const cacheKey = `generate-plan:${JSON.stringify(planParams)}`;
+    const plan = await deduplicateRequest(cacheKey, () => generateDailyShakePlan(planParams));
     return res.status(200).json(plan);
   } catch (error: unknown) {
     console.warn('[API generate-plan] AI plan generation failed or returned non-JSON, switching to deterministic fallback:', error);
@@ -66,7 +73,7 @@ export default async function handler(req: Request, res: Response) {
       const msg = fallbackError instanceof Error ? fallbackError.message : 'Plan oluşturulamadı';
       return res.status(500).json({
         error: 'Günlük shake planı oluşturulamadı.',
-        detail: msg,
+        ...(process.env.NODE_ENV !== 'production' && { detail: msg }),
       });
     }
   }

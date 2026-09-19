@@ -21,14 +21,22 @@ interface MealAnalysisModalProps {
   onMealSaved: (meal: MealAnalysis) => void;
 }
 
+const MAX_PHOTOS = 4;
+
+interface PhotoItem {
+  base64Data: string;
+  previewUrl: string;
+}
+
 export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
   onClose,
   onMealSaved,
 }) => {
-  const [file, setFile] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [base64Data, setBase64Data] = useState<string | null>(null);
-  const [mimeType, setMimeType] = useState<string>('image/jpeg');
+  // Supports 1-4 photos of the same meal (e.g. different angles, or a shot that shows
+  // what's under the rice next to one that shows the whole plate) for a more accurate
+  // analysis. The backend (analyzeMealMultiVision) already accepted a `photos` array;
+  // this UI previously only ever sent a single image.
+  const [photos, setPhotos] = useState<PhotoItem[]>([]);
 
   const [mealType, setMealType] = useState<MealAnalysis['mealType']>('lunch');
   const [mealName, setMealName] = useState<string>('Öğle Yemeği');
@@ -54,23 +62,28 @@ export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
 
-  const handleProcessFile = async (selectedFile: File) => {
+  const handleAddPhoto = async (selectedFile: File) => {
+    if (photos.length >= MAX_PHOTOS) {
+      setError(`En fazla ${MAX_PHOTOS} fotoğraf ekleyebilirsiniz.`);
+      return;
+    }
     try {
       setError(null);
-      setFile(selectedFile);
       const compressed = await compressImage(selectedFile, 1024, 0.82);
-      setPreviewUrl(compressed.dataUrl);
-      setBase64Data(compressed.base64Data);
-      setMimeType(compressed.mimeType);
+      setPhotos((prev) => [...prev, { base64Data: compressed.base64Data, previewUrl: compressed.dataUrl }]);
     } catch (err: unknown) {
       console.error(err);
       setError('Görsel işlenemedi. Lütfen başka bir fotoğraf deneyin.');
     }
   };
 
+  const handleRemovePhoto = (index: number) => {
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handleStartAnalysis = async () => {
-    if (!base64Data) {
-      setError('Lütfen önce bir fotoğraf çekin veya galerinizden yükleyin.');
+    if (photos.length === 0) {
+      setError('Lütfen önce en az bir fotoğraf çekin veya galerinizden yükleyin.');
       return;
     }
 
@@ -79,8 +92,7 @@ export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
 
     try {
       const result = await analyzeMealApi({
-        imageBase64: base64Data,
-        mimeType,
+        photos: photos.map((p) => p.base64Data),
         mealName,
         userNotes,
       });
@@ -124,8 +136,8 @@ export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
       date: getTodayDateString(),
       mealType,
       mealName: mealName || 'Analiz Edilen Öğün',
-      photoBase64: savePhotoInStorage ? previewUrl || undefined : undefined,
-      hasPhoto: !!previewUrl,
+      photoBase64: savePhotoInStorage ? photos[0]?.previewUrl : undefined,
+      hasPhoto: photos.length > 0,
       estimatedCalories,
       calorieMin: Math.min(calorieMin, estimatedCalories),
       calorieMax: Math.max(calorieMax, estimatedCalories),
@@ -187,32 +199,48 @@ export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
           {!analyzed ? (
             /* Upload Screen */
             <div className="space-y-4">
-              {/* Photo Area */}
-              {previewUrl ? (
-                <div className="relative rounded-2xl overflow-hidden border border-stone-200 bg-stone-900 aspect-video flex items-center justify-center group">
-                  <img
-                    src={previewUrl}
-                    alt="Yemek Önizleme"
-                    className="w-full h-full object-cover"
-                  />
-                  <div className="absolute inset-0 bg-stone-950/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center gap-2">
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="px-3 py-1.5 bg-white text-stone-800 text-xs font-semibold rounded-xl"
-                    >
-                      Değiştir
-                    </button>
-                    <button
-                      onClick={() => {
-                        setFile(null);
-                        setPreviewUrl(null);
-                        setBase64Data(null);
-                      }}
-                      className="px-3 py-1.5 bg-rose-600 text-white text-xs font-semibold rounded-xl"
-                    >
-                      Kaldır
-                    </button>
+              {/* Photo Area: up to MAX_PHOTOS thumbnails + an "add more" tile */}
+              {photos.length > 0 ? (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-4 gap-2">
+                    {photos.map((photo, idx) => (
+                      <div
+                        key={idx}
+                        className="relative rounded-xl overflow-hidden border border-stone-200 bg-stone-900 aspect-square group"
+                      >
+                        <img
+                          src={photo.previewUrl}
+                          alt={`Yemek fotoğrafı ${idx + 1}`}
+                          className="w-full h-full object-cover"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleRemovePhoto(idx)}
+                          className="absolute top-1 right-1 w-5 h-5 rounded-full bg-stone-950/70 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
+                          title="Bu fotoğrafı kaldır"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                    {photos.length < MAX_PHOTOS && (
+                      <div className="grid grid-cols-1 gap-1 aspect-square">
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="rounded-xl border-2 border-dashed border-emerald-300 bg-emerald-50/50 hover:bg-emerald-50 transition flex items-center justify-center"
+                          title="Fotoğraf ekle"
+                        >
+                          <Plus className="w-5 h-5 text-emerald-700" />
+                        </button>
+                      </div>
+                    )}
                   </div>
+                  <p className="text-[10px] text-stone-500">
+                    {photos.length < MAX_PHOTOS
+                      ? `İstersen farklı açılardan ${MAX_PHOTOS - photos.length} fotoğraf daha ekleyebilirsin — analiz daha isabetli olur.`
+                      : `En fazla ${MAX_PHOTOS} fotoğraf ekleyebilirsin.`}
+                  </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-3">
@@ -250,7 +278,8 @@ export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
                 className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
-                  if (f) handleProcessFile(f);
+                  if (f) handleAddPhoto(f);
+                  e.target.value = '';
                 }}
               />
               <input
@@ -261,7 +290,8 @@ export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
                 className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
-                  if (f) handleProcessFile(f);
+                  if (f) handleAddPhoto(f);
+                  e.target.value = '';
                 }}
               />
 
@@ -475,7 +505,7 @@ export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
               </div>
 
               {/* Photo save checkbox */}
-              {previewUrl && (
+              {photos.length > 0 && (
                 <label className="flex items-center gap-2 text-xs text-stone-600 cursor-pointer pt-1">
                   <input
                     type="checkbox"
@@ -494,7 +524,7 @@ export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
         <div className="pt-3 border-t border-stone-100 shrink-0">
           {!analyzed ? (
             <button
-              disabled={!base64Data || isLoading}
+              disabled={photos.length === 0 || isLoading}
               onClick={handleStartAnalysis}
               className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-2xl font-semibold text-sm flex items-center justify-center gap-2 shadow-sm active:scale-98 transition"
             >
@@ -506,7 +536,7 @@ export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
               ) : (
                 <>
                   <Sparkles className="w-4 h-4" />
-                  Fotoğrafı Analiz Et
+                  {photos.length > 1 ? `${photos.length} Fotoğrafı Analiz Et` : 'Fotoğrafı Analiz Et'}
                 </>
               )}
             </button>

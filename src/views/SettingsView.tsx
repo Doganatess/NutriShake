@@ -274,7 +274,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               1 Shake (2 Eşit Porsiyon)
             </div>
           </div>
-          </div>
         </div>
 
         {/* Aylık Hedef Projeksiyon Bilgilendirmesi */}

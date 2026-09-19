@@ -41,6 +41,45 @@ interface CacheEntry {
 const requestCache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
+// Best-effort per-instance rate limiter for public serverless endpoints.
+// Vercel instances are ephemeral, so this is a protection layer rather than
+// a replacement for a distributed rate limiter.
+interface RateLimitEntry {
+  windowStartedAt: number;
+  count: number;
+}
+const rateLimitStore = new Map<string, RateLimitEntry>();
+
+export function checkRateLimit(key: string, maxRequests: number, windowMs = 60_000): boolean {
+  const now = Date.now();
+
+  // Prevent an unbounded map on long-lived local/server instances.
+  if (rateLimitStore.size > 1000) {
+    for (const [storedKey, entry] of rateLimitStore) {
+      if (now - entry.windowStartedAt >= windowMs) rateLimitStore.delete(storedKey);
+    }
+  }
+
+  const current = rateLimitStore.get(key);
+
+  if (!current || now - current.windowStartedAt >= windowMs) {
+    rateLimitStore.set(key, { windowStartedAt: now, count: 1 });
+    return true;
+  }
+
+  if (current.count >= maxRequests) return false;
+  current.count += 1;
+  return true;
+}
+
+export function getRequestClientKey(req: { headers?: Record<string, unknown> }, scope: string): string {
+  const forwarded = req.headers?.['x-forwarded-for'];
+  const raw = Array.isArray(forwarded) ? forwarded[0] : String(forwarded || '');
+  const client = raw.split(',')[0]?.trim() || 'unknown';
+  return `${scope}:${client}`;
+}
+
+
 export function getCachedResponse(key: string): any | null {
   const entry = requestCache.get(key);
   if (!entry) return null;

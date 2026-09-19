@@ -1,6 +1,7 @@
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
+import { initializeStorageSchema } from './storage/storageAbstraction';
 import './index.css';
 
 // Register PWA Service Worker safely
@@ -21,6 +22,8 @@ if ('serviceWorker' in navigator && window.location.protocol.startsWith('http'))
     }
   });
 }
+
+initializeStorageSchema();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

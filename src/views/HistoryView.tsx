@@ -95,30 +95,51 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       {/* Sub-tab switcher */}
       <div className="flex bg-stone-100 p-1 rounded-2xl">
         <button
+          onClick={() => setSubTab('stats')}
+          className={`flex-1 py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+            subTab === 'stats'
+              ? 'bg-white text-stone-900 shadow-xs'
+              : 'text-stone-600 hover:text-stone-900'
+          }`}
+        >
+          <BarChart2 className="w-4 h-4" />
+          İstatistikler
+        </button>
+        <button
           onClick={() => setSubTab('calendar')}
-          className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+          className={`flex-1 py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
             subTab === 'calendar'
               ? 'bg-white text-stone-900 shadow-xs'
               : 'text-stone-600 hover:text-stone-900'
           }`}
         >
           <CalendarIcon className="w-4 h-4" />
-          Günlük Kayıtlar & Geçmiş
+          Günlük Kayıtlar
         </button>
         <button
           onClick={() => setSubTab('weight')}
-          className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
+          className={`flex-1 py-2 px-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition ${
             subTab === 'weight'
               ? 'bg-white text-stone-900 shadow-xs'
               : 'text-stone-600 hover:text-stone-900'
           }`}
         >
           <Scale className="w-4 h-4" />
-          Kilo Takibi & Trend
+          Kilo Takibi
         </button>
       </div>
 
-      {subTab === 'calendar' ? (
+      {subTab === 'stats' ? (
+        /* FIX: StatisticsView was imported but had no button/branch to ever actually
+           render it — the default subTab='stats' silently fell through to the weight
+           view instead (the ternary only checked for 'calendar'). Now properly wired. */
+        <StatisticsView
+          profile={profile}
+          dailyPlans={dailyPlans}
+          meals={allMeals}
+          weights={weightEntries}
+        />
+      ) : subTab === 'calendar' ? (
         /* CALENDAR / MEALS / SHAKES HISTORY VIEW */
         <div className="space-y-4">
           {/* Date Picker Header */}

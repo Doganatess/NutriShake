@@ -11,33 +11,41 @@ import {
   Package,
   BookOpen,
   Plus,
+  ShoppingCart,
 } from 'lucide-react';
 import {
   IngredientState,
   IngredientCategory,
+  DailyPlan,
 } from '../types';
 import {
   INGREDIENTS_DATABASE,
   INGREDIENT_CATEGORIES,
   searchIngredients,
 } from '../data/ingredients';
-import { saveStoredIngredientStates } from '../storage/storageAbstraction';
+import { saveStoredIngredientStates, getStoredDailyPlans } from '../storage/storageAbstraction';
 import { StockManager } from '../components/StockManager';
 import { addOrReplenishStock } from '../engines/stockEngine';
+import { ShoppingView } from './ShoppingView';
 
 interface IngredientsViewProps {
   ingredientStates: Record<string, IngredientState>;
   onUpdateStates: (newStates: Record<string, IngredientState>) => void;
+  currentPlan?: DailyPlan | null;
 }
 
 export const IngredientsView: React.FC<IngredientsViewProps> = ({
   ingredientStates,
   onUpdateStates,
+  currentPlan,
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'stock' | 'library'>('stock');
+  const [activeSubTab, setActiveSubTab] = useState<'stock' | 'library' | 'shopping'>('stock');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [selectedSweetenerSubCategory, setSelectedSweetenerSubCategory] = useState<'all' | 'jams' | 'honeys' | 'molasses'>('all');
+  // Generic sub-category filter: works for ANY category that has subCategory data in the
+  // ingredient database (currently: sweeteners, dairy, grains, cocoa_extras, nuts), not
+  // just sweeteners. Which sub-tabs actually show up is computed dynamically below.
+  const [selectedSubCategory, setSelectedSubCategory] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'mandatory' | 'allowed' | 'regional'>('all');
   const [quickAddedId, setQuickAddedId] = useState<string | null>(null);
 
@@ -58,13 +66,32 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     return { mandatory, allowed, regional };
   }, [ingredientStates]);
 
+  // Which sub-categories exist for the currently selected main category, with counts.
+  // Only categories whose items actually carry a subCategory field produce any tabs here
+  // (currently: sweeteners, dairy, grains, cocoa_extras, nuts) — others render nothing,
+  // and the sub-tab bar below simply doesn't show.
+  const availableSubCategories = useMemo(() => {
+    if (selectedCategory === 'all') return [];
+    const groups = new Map<string, { nameTr: string; count: number }>();
+    INGREDIENTS_DATABASE.forEach((item) => {
+      if (item.category !== selectedCategory || !item.subCategory) return;
+      const existing = groups.get(item.subCategory);
+      if (existing) {
+        existing.count++;
+      } else {
+        groups.set(item.subCategory, { nameTr: item.subCategoryNameTr || item.subCategory, count: 1 });
+      }
+    });
+    return Array.from(groups.entries()).map(([id, { nameTr, count }]) => ({ id, nameTr, count }));
+  }, [selectedCategory]);
+
   // Filtered ingredients
   const filteredIngredients = useMemo(() => {
     const baseList = selectedCategory !== 'all'
       ? INGREDIENTS_DATABASE.filter((item) => {
           if (item.category !== selectedCategory) return false;
-          if (selectedCategory === 'sweeteners' && selectedSweetenerSubCategory !== 'all') {
-            return item.subCategory === selectedSweetenerSubCategory;
+          if (selectedSubCategory !== 'all') {
+            return item.subCategory === selectedSubCategory;
           }
           return true;
         })
@@ -80,7 +107,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
     }
 
     return list;
-  }, [searchQuery, selectedCategory, selectedSweetenerSubCategory, statusFilter, ingredientStates]);
+  }, [searchQuery, selectedCategory, selectedSubCategory, statusFilter, ingredientStates]);
 
   const handleSetState = (ingredientId: string, state: IngredientState) => {
     const updated = {
@@ -110,35 +137,56 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
 
   return (
     <div className="space-y-4 pb-20">
-      {/* Primary Sub-Navigation: Kilerim vs Malzeme Kütüphanesi */}
+      {/* Primary Sub-Navigation: Kilerim vs Malzeme Kütüphanesi vs Alışveriş Listesi */}
       <div className="flex bg-stone-100 p-1.5 rounded-3xl border border-stone-200">
         <button
           onClick={() => setActiveSubTab('stock')}
-          className={`flex-1 py-2.5 px-4 rounded-2xl text-xs font-bold transition flex items-center justify-center gap-2 ${
+          className={`flex-1 py-2.5 px-2 rounded-2xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
             activeSubTab === 'stock'
               ? 'bg-white text-emerald-800 shadow-xs'
               : 'text-stone-600 hover:text-stone-900'
           }`}
         >
           <Package className="w-4 h-4" />
-          <span>Mutfak Stoğum (Kiler)</span>
+          <span>Kilerim</span>
         </button>
 
         <button
           onClick={() => setActiveSubTab('library')}
-          className={`flex-1 py-2.5 px-4 rounded-2xl text-xs font-bold transition flex items-center justify-center gap-2 ${
+          className={`flex-1 py-2.5 px-2 rounded-2xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
             activeSubTab === 'library'
               ? 'bg-white text-emerald-800 shadow-xs'
               : 'text-stone-600 hover:text-stone-900'
           }`}
         >
           <BookOpen className="w-4 h-4" />
-          <span>Malzeme Kütüphanesi (8 Kategori)</span>
+          <span>Kütüphane</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('shopping')}
+          className={`flex-1 py-2.5 px-2 rounded-2xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+            activeSubTab === 'shopping'
+              ? 'bg-white text-emerald-800 shadow-xs'
+              : 'text-stone-600 hover:text-stone-900'
+          }`}
+        >
+          <ShoppingCart className="w-4 h-4" />
+          <span>Alışveriş</span>
         </button>
       </div>
 
       {/* TAB 1: Stock Pantry Manager */}
       {activeSubTab === 'stock' && <StockManager />}
+
+      {/* TAB 3: Shopping List */}
+      {/* FIX: ShoppingView already existed as a complete, working feature (checklist,
+          cost estimate, WhatsApp share, cost-saving tips, tap-to-add-to-pantry) but was
+          never imported or reachable from anywhere in the app — dead, orphaned screen.
+          Placed here as a third sub-tab since it's the same "Malzemeler" theme. */}
+      {activeSubTab === 'shopping' && (
+        <ShoppingView currentPlan={currentPlan || null} savedPlans={getStoredDailyPlans()} />
+      )}
 
       {/* TAB 2: Static Ingredients Database Library */}
       {activeSubTab === 'library' && (
@@ -236,7 +284,7 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
                 key={cat.id}
                 onClick={() => {
                   setSelectedCategory(cat.id);
-                  if (cat.id !== 'sweeteners') setSelectedSweetenerSubCategory('all');
+                  setSelectedSubCategory('all');
                 }}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition shrink-0 flex items-center gap-1.5 ${
                   selectedCategory === cat.id
@@ -250,50 +298,36 @@ export const IngredientsView: React.FC<IngredientsViewProps> = ({
             ))}
           </div>
 
-          {/* TATLANDIRICILAR 3 ALT SEKME YAPISI: Reçeller, Ballar, Pekmezler */}
-          {selectedCategory === 'sweeteners' && (
+          {/* Sub-category tabs — dynamically shown for any category that has them
+              (sweeteners, dairy, grains, cocoa_extras, nuts today), not just sweeteners */}
+          {availableSubCategories.length > 0 && (
             <div className="p-1.5 bg-amber-50/90 border border-amber-200 rounded-2xl flex items-center gap-1.5 overflow-x-auto">
-              <span className="text-[11px] font-bold text-amber-900 px-2 shrink-0">Tatlandırıcılar:</span>
+              <span className="text-[11px] font-bold text-amber-900 px-2 shrink-0">
+                {INGREDIENT_CATEGORIES.find((c) => c.id === selectedCategory)?.nameTr}:
+              </span>
               <button
-                onClick={() => setSelectedSweetenerSubCategory('all')}
+                onClick={() => setSelectedSubCategory('all')}
                 className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition shrink-0 ${
-                  selectedSweetenerSubCategory === 'all'
+                  selectedSubCategory === 'all'
                     ? 'bg-white text-amber-950 shadow-xs font-bold border border-amber-300'
                     : 'text-amber-800 hover:text-amber-950'
                 }`}
               >
-                Tümü (19)
+                Tümü ({availableSubCategories.reduce((sum, sc) => sum + sc.count, 0)})
               </button>
-              <button
-                onClick={() => setSelectedSweetenerSubCategory('jams')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition shrink-0 flex items-center gap-1 ${
-                  selectedSweetenerSubCategory === 'jams'
-                    ? 'bg-white text-rose-900 shadow-xs font-bold border border-rose-300'
-                    : 'text-stone-700 hover:text-stone-950'
-                }`}
-              >
-                <span>🍓</span> Reçeller (10)
-              </button>
-              <button
-                onClick={() => setSelectedSweetenerSubCategory('honeys')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition shrink-0 flex items-center gap-1 ${
-                  selectedSweetenerSubCategory === 'honeys'
-                    ? 'bg-white text-amber-900 shadow-xs font-bold border border-amber-300'
-                    : 'text-stone-700 hover:text-stone-950'
-                }`}
-              >
-                <span>🍯</span> Ballar (3)
-              </button>
-              <button
-                onClick={() => setSelectedSweetenerSubCategory('molasses')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition shrink-0 flex items-center gap-1 ${
-                  selectedSweetenerSubCategory === 'molasses'
-                    ? 'bg-white text-stone-950 shadow-xs font-bold border border-stone-400'
-                    : 'text-stone-700 hover:text-stone-950'
-                }`}
-              >
-                <span>🫗</span> Pekmezler (6)
-              </button>
+              {availableSubCategories.map((sc) => (
+                <button
+                  key={sc.id}
+                  onClick={() => setSelectedSubCategory(sc.id)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition shrink-0 ${
+                    selectedSubCategory === sc.id
+                      ? 'bg-white text-stone-950 shadow-xs font-bold border border-stone-300'
+                      : 'text-stone-700 hover:text-stone-950'
+                  }`}
+                >
+                  {sc.nameTr} ({sc.count})
+                </button>
+              ))}
             </div>
           )}
 

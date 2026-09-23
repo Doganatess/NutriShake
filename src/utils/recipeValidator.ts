@@ -68,7 +68,7 @@ export function calculateRecipeSimilarity(
 
 /**
  * Counts how many canonical ingredients differ between two recipes (ingredients present
- * in one set but not the other — i.e. the symmetric difference). Used to guarantee that
+ * in one set but not the other â i.e. the symmetric difference). Used to guarantee that
  * "different" candidate shakes actually swap at least a couple of real ingredients,
  * rather than passing a loose Jaccard-similarity threshold on a single 1-for-1 swap.
  */
@@ -85,9 +85,9 @@ export function countDifferingIngredients(
 }
 
 // Thick (non-liquid) dairy bases need added water to reach a drinkable milkshake
-// consistency. Ratio is relative to the yogurt's own weight — strained yogurt is
+// consistency. Ratio is relative to the yogurt's own weight â strained yogurt is
 // drained and much thicker than village yogurt, so it needs proportionally more water.
-// (Mirrors the same logic in recipeCompositionEngine.ts's deterministic builder —
+// (Mirrors the same logic in recipeCompositionEngine.ts's deterministic builder â
 // duplicated here rather than imported to avoid a circular module dependency, since
 // recipeCompositionEngine.ts already imports from this file.)
 const YOGURT_WATER_RATIO: Record<string, number> = {
@@ -100,7 +100,7 @@ const YOGURT_WATER_RATIO: Record<string, number> = {
  * automatically adds (or tops up) water so the finished shake is actually drinkable
  * rather than spoon-thick. Water is calorie-free so this never affects the calorie target.
  * Applied here so AI-generated shakes get the same consistency fix as the deterministic
- * engine's own recipes — previously only the deterministic path had this.
+ * engine's own recipes â previously only the deterministic path had this.
  */
 function addConsistencyWaterIfNeeded(ingredients: ShakeIngredient[]): ShakeIngredient[] {
   const thickDairy = ingredients.find(
@@ -203,7 +203,7 @@ export function validateMasterRecipe(
 
   const ingredients = shake.ingredients || [];
 
-  // 1. Calorie Delta: informational only — a calorie deviation from target must NEVER
+  // 1. Calorie Delta: informational only â a calorie deviation from target must NEVER
   // block validity. Per product decision, when pantry stock can't reach the exact
   // target, the closest achievable recipe is still accepted silently (no error,
   // no user-facing warning). Only genuine rule violations below (dairy, kefir,
@@ -214,7 +214,7 @@ export function validateMasterRecipe(
       // Intentionally NOT pushed to `errors` and NOT flipping rulesPassed.rule1_calorieDelta.
       // Kept as a silent warning only (never surfaced to the user) for debugging/telemetry.
       warnings.push(
-        `Bilgi: Shake toplamı (${shake.estimatedCalories} kcal) hedeften (${options.targetKcal} kcal) ${delta} kcal saptı; stok sınırları dahilinde en yakın tarif kabul edildi.`
+        `Bilgi: Shake toplamÄ± (${shake.estimatedCalories} kcal) hedeften (${options.targetKcal} kcal) ${delta} kcal saptÄ±; stok sÄ±nÄ±rlarÄ± dahilinde en yakÄ±n tarif kabul edildi.`
       );
     }
   }
@@ -224,7 +224,7 @@ export function validateMasterRecipe(
   if (stock) {
     for (const ing of ingredients) {
       const canonId = canonicalIngredientId(ing.ingredientId);
-      // Tap water is a free kitchen utility, not a tracked pantry item — it's added
+      // Tap water is a free kitchen utility, not a tracked pantry item â it's added
       // automatically for drinkable consistency (e.g. thinning thick yogurt) and must
       // never require the user to have "water" in their stock list.
       if (canonId === 'other_water') continue;
@@ -233,11 +233,11 @@ export function validateMasterRecipe(
 
       if (available <= 0) {
         rulesPassed.rule2_inStock = false;
-        errors.push(`Kural 2 İhlali (Stokta Yok): "${ingName}" kiler stoğunuzda bulunmuyor.`);
+        errors.push(`Kural 2 Ä°hlali (Stokta Yok): "${ingName}" kiler stoÄunuzda bulunmuyor.`);
       } else if (ing.amount > available) {
         rulesPassed.rule3_stockQuantity = false;
         errors.push(
-          `Kural 3 İhlali (Yetersiz Stok): "${ingName}" için ${ing.amount}g gerekiyor ancak kilerde yalnızca ${available}g var.`
+          `Kural 3 Ä°hlali (Yetersiz Stok): "${ingName}" iÃ§in ${ing.amount}g gerekiyor ancak kilerde yalnÄ±zca ${available}g var.`
         );
       }
     }
@@ -251,7 +251,7 @@ export function validateMasterRecipe(
       dairyCanonicalIds.add(canonId);
     } else {
       const lower = canonId.toLowerCase();
-      if (lower.includes('milk') || lower.includes('yogurt') || lower.includes('yoğurt') || lower.includes('süt')) {
+      if (lower.includes('milk') || lower.includes('yogurt') || lower.includes('yoÄurt') || lower.includes('sÃ¼t')) {
         dairyCanonicalIds.add(canonId);
       }
     }
@@ -261,12 +261,12 @@ export function validateMasterRecipe(
   if (dairyIngredientCount < 1) {
     rulesPassed.rule4_hasAllowedDairy = false;
     errors.push(
-      'Kural 4 İhlali (Zorunlu Süt Ürünü): Tarifte Tam Yağlı Süt, Yarım Yağlı Süt, Köy Yoğurdu veya Süzme Yoğurttan en az biri bulunmalıdır (dairyIngredientCount >= 1 sağlanamadı).'
+      'Kural 4 Ä°hlali (Zorunlu SÃ¼t ÃrÃ¼nÃ¼): Tarifte Tam YaÄlÄ± SÃ¼t, YarÄ±m YaÄlÄ± SÃ¼t, KÃ¶y YoÄurdu veya SÃ¼zme YoÄurttan en az biri bulunmalÄ±dÄ±r (dairyIngredientCount >= 1 saÄlanamadÄ±).'
     );
   } else if (dairyIngredientCount > 1) {
     rulesPassed.rule4_hasAllowedDairy = false;
     errors.push(
-      `Kural 4 İhlali (Süt Ürünü Sınırı - En Fazla 1): Bir shake tarifinde yalnızca 1 farklı süt ürünü kullanılabilir; süt + yoğurt veya iki farklı süt/yoğurt bir arada kullanılamaz (dairyIngredientCount <= 1 ihlali: ${dairyIngredientCount} adet süt ürünü bulundu).`
+      `Kural 4 Ä°hlali (SÃ¼t ÃrÃ¼nÃ¼ SÄ±nÄ±rÄ± - En Fazla 1): Bir shake tarifinde yalnÄ±zca 1 farklÄ± sÃ¼t Ã¼rÃ¼nÃ¼ kullanÄ±labilir; sÃ¼t + yoÄurt veya iki farklÄ± sÃ¼t/yoÄurt bir arada kullanÄ±lamaz (dairyIngredientCount <= 1 ihlali: ${dairyIngredientCount} adet sÃ¼t Ã¼rÃ¼nÃ¼ bulundu).`
     );
   }
 
@@ -289,7 +289,7 @@ export function validateMasterRecipe(
   if (fruitIngredientCount > 2) {
     rulesPassed.rule10_balancedIngredientCount = false;
     errors.push(
-      `Meyve Sınırı İhlali (En Fazla 2): Bir shake tarifinde en fazla 2 farklı meyve kullanılabilir (fruitIngredientCount <= 2 ihlali: ${fruitIngredientCount} farklı meyve bulundu: ${Array.from(fruitCanonicalIds).join(', ')}).`
+      `Meyve SÄ±nÄ±rÄ± Ä°hlali (En Fazla 2): Bir shake tarifinde en fazla 2 farklÄ± meyve kullanÄ±labilir (fruitIngredientCount <= 2 ihlali: ${fruitIngredientCount} farklÄ± meyve bulundu: ${Array.from(fruitCanonicalIds).join(', ')}).`
     );
   }
 
@@ -300,7 +300,7 @@ export function validateMasterRecipe(
   });
   if (hasKefir) {
     rulesPassed.rule5_noKefir = false;
-    errors.push('Kural 5 İhlali (Kefir Yasağı): Kefir kullanımı bu diyet sisteminde kesinlikle yasaktır.');
+    errors.push('Kural 5 Ä°hlali (Kefir YasaÄÄ±): Kefir kullanÄ±mÄ± bu diyet sisteminde kesinlikle yasaktÄ±r.');
   }
 
   // 6. Strictly NO Protein Powders / Synthetic Supplements
@@ -315,7 +315,7 @@ export function validateMasterRecipe(
   });
   if (hasSupplements) {
     rulesPassed.rule6_noProteinOrSupplements = false;
-    errors.push('Kural 6 İhlali (Takviye Yasağı): Sentetik takviye veya protein tozu kullanımı yasaktır.');
+    errors.push('Kural 6 Ä°hlali (Takviye YasaÄÄ±): Sentetik takviye veya protein tozu kullanÄ±mÄ± yasaktÄ±r.');
   }
 
   // 7. Canonical Duplicates
@@ -323,7 +323,7 @@ export function validateMasterRecipe(
   const uniqueCanonicalSet = new Set(canonicalList);
   if (uniqueCanonicalSet.size !== ingredients.length) {
     rulesPassed.rule7_noCanonicalDuplicates = false;
-    errors.push('Kural 7 İhlali (Tekrar Eden Malzeme): Aynı malzeme tarife birden fazla kez eklenemez; birleştirilmelidir.');
+    errors.push('Kural 7 Ä°hlali (Tekrar Eden Malzeme): AynÄ± malzeme tarife birden fazla kez eklenemez; birleÅtirilmelidir.');
   }
 
   // 8. Exactly 2 Equal Portions (50% + 50%)
@@ -331,7 +331,7 @@ export function validateMasterRecipe(
   if (shake.portionCount !== 2 || portionDiff > 3) {
     rulesPassed.rule8_twoEqualPortions = false;
     errors.push(
-      `Kural 8 İhlali (2 Eşit Porsiyon): Tarif 2 eşit porsiyona (%50 + %50) bölünmelidir (Toplam: ${shake.estimatedCalories} kcal, Porsiyon: ${shake.portionCalories} kcal).`
+      `Kural 8 Ä°hlali (2 EÅit Porsiyon): Tarif 2 eÅit porsiyona (%50 + %50) bÃ¶lÃ¼nmelidir (Toplam: ${shake.estimatedCalories} kcal, Porsiyon: ${shake.portionCalories} kcal).`
     );
   }
 
@@ -347,7 +347,7 @@ export function validateMasterRecipe(
 
     if (isDuplicateThisWeek) {
       rulesPassed.rule9_weeklyHistoryUnique = false;
-      errors.push('Kural 9 İhlali (Haftalık Tekrar): Bu malzeme kombinasyonu bu hafta içinde zaten önerildi.');
+      errors.push('Kural 9 Ä°hlali (HaftalÄ±k Tekrar): Bu malzeme kombinasyonu bu hafta iÃ§inde zaten Ã¶nerildi.');
     }
   }
 
@@ -355,7 +355,7 @@ export function validateMasterRecipe(
   if (ingredients.length < 3 || ingredients.length > 6) {
     rulesPassed.rule10_balancedIngredientCount = false;
     errors.push(
-      `Kural 10 İhlali (Malzeme Sayısı Dengesi): Tarif 3 ile 6 arasında malzeme içermelidir (Mevcut: ${ingredients.length}).`
+      `Kural 10 Ä°hlali (Malzeme SayÄ±sÄ± Dengesi): Tarif 3 ile 6 arasÄ±nda malzeme iÃ§ermelidir (Mevcut: ${ingredients.length}).`
     );
   }
 
@@ -369,7 +369,7 @@ export function validateMasterRecipe(
   }
   if (liquidVolumeMl > 750) {
     rulesPassed.rule11_liquidVolumeLimit = false;
-    errors.push(`Kural 11 İhlali (Aşırı Sıvı Hacmi): Toplam sıvı miktarı 700-750 ml sınırını aşıyor (${liquidVolumeMl} ml).`);
+    errors.push(`Kural 11 Ä°hlali (AÅÄ±rÄ± SÄ±vÄ± Hacmi): Toplam sÄ±vÄ± miktarÄ± 700-750 ml sÄ±nÄ±rÄ±nÄ± aÅÄ±yor (${liquidVolumeMl} ml).`);
   }
 
   // 12. Calorie Density Check (Total Weight/Volume vs Calories)
@@ -378,7 +378,7 @@ export function validateMasterRecipe(
     const density = shake.estimatedCalories / totalWeightOrVolume;
     // For weight gainer shakes with high calorie density (nuts, oats, honey), density should be >= 1.0 kcal/g
     if (density < 0.95 && shake.estimatedCalories > 1500) {
-      warnings.push(`Düşük Kalori Yoğunluğu: Shake gramajına göre kalori yoğunluğu düşük (${density.toFixed(2)} kcal/g). Fındık/yulaf oranı artırılabilir.`);
+      warnings.push(`DÃ¼ÅÃ¼k Kalori YoÄunluÄu: Shake gramajÄ±na gÃ¶re kalori yoÄunluÄu dÃ¼ÅÃ¼k (${density.toFixed(2)} kcal/g). FÄ±ndÄ±k/yulaf oranÄ± artÄ±rÄ±labilir.`);
     }
   }
 
@@ -415,12 +415,12 @@ export function validateAndSanitizeShake(
   const warnings: string[] = [];
 
   if (!shakeCandidate.name || shakeCandidate.name.trim().length === 0) {
-    errors.push('Tarif adı eksik veya geçersiz.');
+    errors.push('Tarif adÄ± eksik veya geÃ§ersiz.');
   }
 
   const rawIngredients = shakeCandidate.ingredients || [];
   if (rawIngredients.length === 0) {
-    errors.push('Tarifte en az bir malzeme bulunmalıdır.');
+    errors.push('Tarifte en az bir malzeme bulunmalÄ±dÄ±r.');
     return { isValid: false, errors, warnings };
   }
 
@@ -444,7 +444,7 @@ export function validateAndSanitizeShake(
 
     // Guard d: Strictly NO Kefir
     if (lowerId.includes('kefir')) {
-      warnings.push('Kefir kural gereği tariften çıkarıldı. Yerine izin verilen doğal süt ürünü kullanılmalıdır.');
+      warnings.push('Kefir kural gereÄi tariften Ã§Ä±karÄ±ldÄ±. Yerine izin verilen doÄal sÃ¼t Ã¼rÃ¼nÃ¼ kullanÄ±lmalÄ±dÄ±r.');
       continue;
     }
 
@@ -455,13 +455,13 @@ export function validateAndSanitizeShake(
       lowerId.includes('supplement') ||
       lowerId.includes('isolate')
     ) {
-      warnings.push(`Sentetik takviye/protein tozu (${def.name}) kural gereği tariften çıkarıldı.`);
+      warnings.push(`Sentetik takviye/protein tozu (${def.name}) kural gereÄi tariften Ã§Ä±karÄ±ldÄ±.`);
       continue;
     }
 
     // Guard against prohibited spices (cinnamon, ginger)
     if (lowerId.includes('cinnamon') || lowerId.includes('ginger')) {
-      warnings.push(`Baharat (${def.name}) shake kuralları gereği tariften çıkarıldı.`);
+      warnings.push(`Baharat (${def.name}) shake kurallarÄ± gereÄi tariften Ã§Ä±karÄ±ldÄ±.`);
       continue;
     }
 
@@ -485,14 +485,14 @@ export function validateAndSanitizeShake(
         amount: totalAmount,
         quantity: totalAmount,
       });
-      warnings.push(`Tekrar eden "${def.name}" malzemesi tekilleştirildi (${totalAmount}${unit}).`);
+      warnings.push(`Tekrar eden "${def.name}" malzemesi tekilleÅtirildi (${totalAmount}${unit}).`);
     }
   }
 
   let workingIngredients: ShakeIngredient[] = Array.from(ingredientMap.values());
 
   if (workingIngredients.length === 0) {
-    errors.push('Geçerli hiçbir malzeme bulunamadı.');
+    errors.push('GeÃ§erli hiÃ§bir malzeme bulunamadÄ±.');
     return { isValid: false, errors, warnings };
   }
 
@@ -505,8 +505,8 @@ export function validateAndSanitizeShake(
       canon.startsWith('dairy_') ||
       canon.includes('milk') ||
       canon.includes('yogurt') ||
-      canon.includes('yoğurt') ||
-      canon.includes('süt')
+      canon.includes('yoÄurt') ||
+      canon.includes('sÃ¼t')
     );
   };
 
@@ -551,12 +551,12 @@ export function validateAndSanitizeShake(
       quantity: defaultAmount,
       unit: defaultUnit,
     });
-    warnings.push(`Süt ürünü eksikti, kural gereği ${dairyDef ? dairyDef.name : 'Tam Yağlı Süt'} (${defaultAmount} ${defaultUnit}) eklendi.`);
+    warnings.push(`SÃ¼t Ã¼rÃ¼nÃ¼ eksikti, kural gereÄi ${dairyDef ? dairyDef.name : 'Tam YaÄlÄ± SÃ¼t'} (${defaultAmount} ${defaultUnit}) eklendi.`);
   } else if (dairyIngredientCount > 1) {
     // Keep first, remove others
     const firstDairy = dairyItems[0];
     workingIngredients = workingIngredients.filter((i) => !isDairy(i.ingredientId) || i === firstDairy);
-    warnings.push(`Birden fazla süt ürünü bulundu (${dairyIngredientCount} adet). Kural gereği yalnızca ilk süt ürünü tutuldu, diğerleri çıkarıldı.`);
+    warnings.push(`Birden fazla sÃ¼t Ã¼rÃ¼nÃ¼ bulundu (${dairyIngredientCount} adet). Kural gereÄi yalnÄ±zca ilk sÃ¼t Ã¼rÃ¼nÃ¼ tutuldu, diÄerleri Ã§Ä±karÄ±ldÄ±.`);
   }
 
   // Update dairy count
@@ -573,7 +573,7 @@ export function validateAndSanitizeShake(
     const itemsToRemove = new Set(fruitItems.slice(0, toRemoveCount));
 
     workingIngredients = workingIngredients.filter((i) => !itemsToRemove.has(i));
-    warnings.push(`Meyve sayısı (${fruitIngredientCount}) 2 sınırını aştığı için en düşük kalori katkısı yapan ${toRemoveCount} meyve çıkarıldı.`);
+    warnings.push(`Meyve sayÄ±sÄ± (${fruitIngredientCount}) 2 sÄ±nÄ±rÄ±nÄ± aÅtÄ±ÄÄ± iÃ§in en dÃ¼ÅÃ¼k kalori katkÄ±sÄ± yapan ${toRemoveCount} meyve Ã§Ä±karÄ±ldÄ±.`);
   }
 
   // Update fruit count
@@ -590,7 +590,7 @@ export function validateAndSanitizeShake(
     const itemsToRemove = new Set(nonDairyItems.slice(0, toRemoveCount));
 
     workingIngredients = workingIngredients.filter((i) => !itemsToRemove.has(i));
-    warnings.push(`Malzeme sayısı (${totalIngredientCount}) 6 sınırını aştığı için en az kalori katkısı sağlayan ${toRemoveCount} malzeme çıkarıldı.`);
+    warnings.push(`Malzeme sayÄ±sÄ± (${totalIngredientCount}) 6 sÄ±nÄ±rÄ±nÄ± aÅtÄ±ÄÄ± iÃ§in en az kalori katkÄ±sÄ± saÄlayan ${toRemoveCount} malzeme Ã§Ä±karÄ±ldÄ±.`);
   }
 
   // Update total count
@@ -601,7 +601,7 @@ export function validateAndSanitizeShake(
   if (stock && Object.keys(stock).length > 0) {
     let stockValidation = validateRecipeStock(workingIngredients, stock);
 
-    // a) Önce mümkünse miktarı mevcut stoğa göre otomatik küçült
+    // a) Ãnce mÃ¼mkÃ¼nse miktarÄ± mevcut stoÄa gÃ¶re otomatik kÃ¼Ã§Ã¼lt
     if (!stockValidation.isValid) {
       for (const missingItem of stockValidation.missing) {
         const itemIdx = workingIngredients.findIndex(
@@ -625,16 +625,91 @@ export function validateAndSanitizeShake(
       stockValidation = validateRecipeStock(workingIngredients, stock);
     }
 
-    // b) Hâlâ yetersizse — bu artık BLOK EDEN bir hata değil, sadece sessiz bilgi notu.
-    // Per product decision (Seçenek 2): stok yetersizliği asla kullanıcıya gösterilen
-    // bir uyarı ya da hata üretmemeli; kilerdeki mevcut miktarlarla en yakın geçerli
-    // tarif sessizce kabul edilir.
+    // b) Stok hiÃ§bir zaman aÅÄ±lmamalÄ±dÄ±r. Eksik miktarÄ± sessizce kabul etmek yerine
+    // mevcut miktarÄ± kullan; aÅaÄÄ±daki kalori tamamlama adÄ±mÄ± farkÄ± baÅka uygun
+    // stok malzemeleriyle kapatmaya Ã§alÄ±ÅÄ±r.
     if (!stockValidation.isValid) {
-      const pantryCap = calculatePantryShakeCalorieCapacity(stock);
       for (const missingItem of stockValidation.missing) {
-        warnings.push(
-          `Bilgi: "${missingItem.ingredientName}" için ${missingItem.requiredNormalized}g gerekiyordu, kilerde ${missingItem.availableNormalized}g vardı (Kilerdeki toplam kapasite: ${pantryCap.totalCalories} kcal). Mevcut stokla en yakın tarif kabul edildi.`
+        const itemIdx = workingIngredients.findIndex(
+          (i) => canonicalIngredientId(i.ingredientId) === canonicalIngredientId(missingItem.ingredientId)
         );
+        if (itemIdx === -1) continue;
+
+        const avail = Math.max(0, missingItem.availableNormalized);
+        if (avail > 0) {
+          workingIngredients[itemIdx].amount = avail;
+          workingIngredients[itemIdx].quantity = avail;
+        } else {
+          workingIngredients.splice(itemIdx, 1);
+        }
+      }
+      stockValidation = validateRecipeStock(workingIngredients, stock);
+    }
+
+    // c) If stock-limited quantities lowered calories, complete the recipe from
+    // other ingredients that are actually in stock. Never invent stock and never
+    // exceed the user's available quantity.
+    if (options.targetKcal && options.targetKcal > 0) {
+      const current = calculateShakeNutrition(workingIngredients).calories;
+      let deficit = options.targetKcal - current;
+
+      if (deficit > 50 && workingIngredients.length < 6) {
+        const usedCanonical = new Set(
+          workingIngredients.map((i) => canonicalIngredientId(i.ingredientId))
+        );
+
+        const completionCandidates = Object.values(INGREDIENT_MAP)
+          .filter((def) => {
+            const id = canonicalIngredientId(def.id);
+            if (!id || usedCanonical.has(id)) return false;
+            if (id.includes('kefir') || id.includes('protein_powder') || id.includes('whey') || id.includes('supplement') || id.includes('isolate')) return false;
+            const available = getAvailableStockGrams(stock, id);
+            if (available <= 0) return false;
+            // Preserve exactly one dairy product in the recipe.
+            if (def.category === 'dairy') return false;
+            return ['grains', 'sweeteners', 'cocoa_extras', 'nuts', 'fruits', 'dried_fruits', 'others'].includes(def.category);
+          })
+          .sort((a, b) => {
+            const ak = (a.caloriesPer100g || 0) / 100;
+            const bk = (b.caloriesPer100g || 0) / 100;
+            return bk - ak;
+          });
+
+        for (const candidate of completionCandidates) {
+          if (deficit <= 50 || workingIngredients.length >= 6) break;
+          const id = canonicalIngredientId(candidate.id);
+          const available = getAvailableStockGrams(stock, id);
+          const kcalPerGram = Math.max(0.1, (candidate.caloriesPer100g || 0) / 100);
+          const safeCap = candidate.category === 'grains' ? 180 : candidate.category === 'nuts' ? 70 : candidate.category === 'sweeteners' ? 80 : candidate.category === 'fruits' || candidate.category === 'dried_fruits' ? 180 : 40;
+          const grams = Math.min(available, safeCap, Math.ceil(deficit / kcalPerGram));
+          if (grams < 5) continue;
+
+          workingIngredients.push({
+            ingredientId: id,
+            amount: grams,
+            quantity: grams,
+            unit: candidate.category === 'dairy' ? 'ml' : 'g',
+          });
+          deficit -= grams * kcalPerGram;
+        }
+      }
+    }
+
+    // Final deterministic stock check: no sanitized recipe may exceed inventory.
+    const finalStockValidation = validateRecipeStock(workingIngredients, stock);
+    if (!finalStockValidation.isValid) {
+      for (const missingItem of finalStockValidation.missing) {
+        const itemIdx = workingIngredients.findIndex(
+          (i) => canonicalIngredientId(i.ingredientId) === canonicalIngredientId(missingItem.ingredientId)
+        );
+        if (itemIdx === -1) continue;
+        const avail = Math.max(0, missingItem.availableNormalized);
+        if (avail > 0) {
+          workingIngredients[itemIdx].amount = avail;
+          workingIngredients[itemIdx].quantity = avail;
+        } else {
+          workingIngredients.splice(itemIdx, 1);
+        }
       }
     }
   }
@@ -720,48 +795,21 @@ export function validateAndSanitizeShake(
           }
         }
 
-        // If still significant deficit and recipe has < 6 ingredients, add healthy nuts/seeds to reach target
-        if (remainingDeficit > 150 && workingIngredients.length < 6) {
-          const hasNuts = workingIngredients.some((i) => {
-            const canon = canonicalIngredientId(i.ingredientId);
-            const def = INGREDIENT_MAP[canon] || INGREDIENT_MAP[i.ingredientId];
-            return def?.category === 'nuts' || canon.includes('nut') || canon.includes('seed');
-          });
-          if (!hasNuts) {
-            let nutId = 'nut_walnut';
-            if (stock) {
-              for (const n of ['nut_walnut', 'nut_hazelnut', 'nut_almond', 'seed_peanut_butter', 'seed_chia']) {
-                if (getAvailableStockGrams(stock, n) >= 15) {
-                  nutId = n;
-                  break;
-                }
-              }
-            }
-            const nutDef = INGREDIENT_MAP[nutId];
-            if (nutDef && (!stock || getAvailableStockGrams(stock, nutId) >= 15)) {
-              const maxStock = stock ? getAvailableStockGrams(stock, nutId) : 60;
-              const kcalPerG = (nutDef.caloriesPer100g || 650) / 100;
-              const nutGrams = Math.min(Math.min(50, maxStock), Math.round(remainingDeficit / kcalPerG));
-              if (nutGrams >= 15) {
-                workingIngredients.push({
-                  ingredientId: nutId,
-                  amount: nutGrams,
-                  quantity: nutGrams,
-                  unit: 'g',
-                });
-                warnings.push(`Hedef kaloriye ulaşmak için ${nutDef.name} (${nutGrams}g) eklendi.`);
-              }
-            }
-          }
-        }
       }
 
-      warnings.push(`Tarif malzeme miktarları hedef kaloriye (~${target} kcal) göre otomatik optimize edildi.`);
+      warnings.push(`Tarif malzeme miktarlarÄ± hedef kaloriye (~${target} kcal) gÃ¶re otomatik optimize edildi.`);
     }
   }
 
   // 4. Calculate deterministic nutrition
   const nutrition = calculateShakeNutrition(workingIngredients);
+
+  if (stock && Object.keys(stock).length > 0) {
+    const finalValidation = validateRecipeStock(workingIngredients, stock);
+    if (!finalValidation.isValid) {
+      errors.push('Tarif mevcut stok miktarlarÄ±nÄ± aÅamaz; stok dÄ±ÅÄ± miktar oluÅturulmasÄ± engellendi.');
+    }
+  }
 
   // 5. Equal 50/50 portion division
   const totalCalories = nutrition.calories;
@@ -775,13 +823,13 @@ export function validateAndSanitizeShake(
     const pantryCap = stock ? calculatePantryShakeCalorieCapacity(stock).totalCalories : Infinity;
     if (pantryCap < options.targetKcal - 300) {
       warnings.push(
-        `Kilerdeki toplam stok kapasitesi (${pantryCap} kcal), hedef kaloriden (${options.targetKcal} kcal) düşük olduğundan tarif kiler stoğuna (${totalCalories} kcal) göre dengelendi.`
+        `Kilerdeki toplam stok kapasitesi (${pantryCap} kcal), hedef kaloriden (${options.targetKcal} kcal) dÃ¼ÅÃ¼k olduÄundan tarif kiler stoÄuna (${totalCalories} kcal) gÃ¶re dengelendi.`
       );
     } else {
       const diff = Math.abs(totalCalories - options.targetKcal);
       if (diff > 250) {
         warnings.push(
-          `Shake toplam kalorisi (${totalCalories} kcal) hedef kaloriden (${options.targetKcal} kcal) ${diff} kcal sapma göstermektedir.`
+          `Shake toplam kalorisi (${totalCalories} kcal) hedef kaloriden (${options.targetKcal} kcal) ${diff} kcal sapma gÃ¶stermektedir.`
         );
       }
     }
@@ -789,8 +837,8 @@ export function validateAndSanitizeShake(
 
   const sanitizedShake: Shake = {
     id: shakeCandidate.id || `shake_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-    name: shakeCandidate.name || 'Özel Besleyici Doğal Shake',
-    description: shakeCandidate.description || `Günün 2 eşit porsiyona ayrılmış doğal shake tarifi (Toplam ${totalCalories} kcal • Porsiyon başı ${portionCalories} kcal).`,
+    name: shakeCandidate.name || 'Ãzel Besleyici DoÄal Shake',
+    description: shakeCandidate.description || `GÃ¼nÃ¼n 2 eÅit porsiyona ayrÄ±lmÄ±Å doÄal shake tarifi (Toplam ${totalCalories} kcal â¢ Porsiyon baÅÄ± ${portionCalories} kcal).`,
     ingredients: nutrition.ingredients,
     estimatedCalories: totalCalories,
     portionCount: 2,
@@ -809,11 +857,11 @@ export function validateAndSanitizeShake(
     instructions:
       shakeCandidate.instructions ||
       [
-        'Tüm malzemeleri blendera ekleyin.',
-        'Pürüzsüz homojen bir kıvam alana dek 50-60 saniye karıştırın.',
-        `Hazırlanan karışımı 2 EŞİT PORSİYONA (${portionCalories} kcal / porsiyon) bölün (%50 + %50).`,
-        `Toplam ${totalCalories} kcal • 1. Porsiyon: ${portionCalories} kcal • 2. Porsiyon: ${portionCalories} kcal.`,
-        '1. porsiyonu vardiya öncesi/öğlen, 2. porsiyonu buzdolabında bekleterek vardiya sonrası tüketin.',
+        'TÃ¼m malzemeleri blendera ekleyin.',
+        'PÃ¼rÃ¼zsÃ¼z homojen bir kÄ±vam alana dek 50-60 saniye karÄ±ÅtÄ±rÄ±n.',
+        `HazÄ±rlanan karÄ±ÅÄ±mÄ± 2 EÅÄ°T PORSÄ°YONA (${portionCalories} kcal / porsiyon) bÃ¶lÃ¼n (%50 + %50).`,
+        `Toplam ${totalCalories} kcal â¢ 1. Porsiyon: ${portionCalories} kcal â¢ 2. Porsiyon: ${portionCalories} kcal.`,
+        '1. porsiyonu vardiya Ã¶ncesi/Ã¶Älen, 2. porsiyonu buzdolabÄ±nda bekleterek vardiya sonrasÄ± tÃ¼ketin.',
       ].join('\n'),
     preparationTimeMinutes: shakeCandidate.preparationTimeMinutes || 4,
     portionSize: options.portionPreference || shakeCandidate.portionSize || 'medium',

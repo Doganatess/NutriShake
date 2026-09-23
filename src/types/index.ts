@@ -3,7 +3,47 @@
 
 export const CURRENT_SCHEMA_VERSION = 3;
 
+/** @deprecated Legacy activity model. Kept temporarily for backward compatibility. */
 export type ActivityLevel = 'sedentary' | 'light' | 'moderate' | 'very_active';
+
+export type WorkType =
+  | 'desk_office'
+  | 'teacher'
+  | 'student'
+  | 'waiter_service'
+  | 'cook_kitchen'
+  | 'store_sales'
+  | 'courier'
+  | 'warehouse_logistics'
+  | 'factory'
+  | 'construction'
+  | 'healthcare'
+  | 'cleaning'
+  | 'driver'
+  | 'other';
+
+export type WorkMovementLevel = 'mostly_sitting' | 'some_walking' | 'mostly_standing_moving' | 'heavy_physical';
+export type SportType =
+  | 'none'
+  | 'fitness_weights'
+  | 'running'
+  | 'walking'
+  | 'cycling'
+  | 'football'
+  | 'basketball'
+  | 'swimming'
+  | 'tennis'
+  | 'martial_arts'
+  | 'pilates'
+  | 'other';
+export type ActivityIntensity = 'low' | 'medium' | 'high';
+export type GeneralMovementLevel = 'mostly_home' | 'some_walking' | 'lots_of_walking';
+export type DailyActivityStatus = 'normal' | 'working' | 'off' | 'more_active' | 'less_active';
+export type GoalPaceUnit = 'kg_per_month' | 'kg_per_week';
+export type MealSource = 'manual' | 'photo_ai' | 'quick_entry' | 'generated';
+export type MealStatus = 'draft' | 'confirmed';
+export type EntitlementPlan = 'free' | 'premium';
+export type EntitlementStatus = 'active' | 'trial' | 'expired' | 'cancelled';
 export type PortionPreference = 'small' | 'medium' | 'large'; // Küçük, Orta, Büyük
 export type GoalType = 'lose_weight' | 'maintain' | 'maintain_weight' | 'gain_weight';
 export type ShakeTiming =
@@ -62,6 +102,43 @@ export interface ShiftSchedule {
   mealTimingRecommendation?: string;
 }
 
+export interface GoalSettings {
+  targetWeightKg?: number;
+  targetPace?: number;
+  targetPaceUnit?: GoalPaceUnit;
+  adjustmentKcal?: number;
+}
+
+export interface DailyActivity {
+  date: string;
+  workType?: WorkType;
+  workMovement?: WorkMovementLevel;
+  sportType?: SportType;
+  sportDaysPerWeek?: number;
+  sportMinutesPerSession?: number;
+  sportIntensity?: ActivityIntensity;
+  generalMovement?: GeneralMovementLevel;
+  status?: DailyActivityStatus;
+  notes?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface MacroTargets {
+  protein: number;
+  carbs: number;
+  fat: number;
+  fiber?: number;
+}
+
+export interface Entitlement {
+  plan: EntitlementPlan;
+  status: EntitlementStatus;
+  trialStartedAt?: string;
+  trialExpiresAt?: string;
+  expiresAt?: string;
+}
+
 export interface UserProfile {
   id: string;
   name?: string;
@@ -70,14 +147,27 @@ export interface UserProfile {
   currentWeight: number; // kg
   targetWeight: number; // kg
   height: number; // cm
+  /** @deprecated Use workType/workMovement/sport/generalMovement instead. */
   activityLevel: ActivityLevel;
+  workType?: WorkType;
+  workMovement?: WorkMovementLevel;
+  sportType?: SportType;
+  sportDaysPerWeek?: number;
+  sportMinutesPerSession?: number;
+  sportIntensity?: ActivityIntensity;
+  generalMovement?: GeneralMovementLevel;
+  goalSettings?: GoalSettings;
+  macroTargets?: MacroTargets;
+  entitlement?: Entitlement;
   goal: GoalType;
   dailyShakeCount: number; // 1 or 2
   portionPreference: PortionPreference;
   maintenanceCalories: number; // BMR/TDEE calculated
   calorieGoal: number; // Target daily calories
-  monthlyWeightGoalKg?: number; // Core weight goal: +5 kg / month
-  dailySurplusKcal?: number; // Targeted daily caloric surplus (~1000-1300 kcal)
+  /** @deprecated Legacy field; use goalSettings.targetPace instead. */
+  monthlyWeightGoalKg?: number;
+  /** @deprecated Legacy field; use goalSettings.adjustmentKcal instead. */
+  dailySurplusKcal?: number;
   isCustomCalorieGoal: boolean;
   proteinGoal: number; // g
   carbGoal?: number; // g
@@ -300,6 +390,19 @@ export interface DetectedFoodItem {
   note?: string;
 }
 
+export interface MealItem {
+  id: string;
+  ingredientId?: string;
+  name: string;
+  amount?: number;
+  unit?: SupportedUnit | string;
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  fiber?: number;
+}
+
 export interface Meal {
   id: string;
   date: string; // YYYY-MM-DD
@@ -310,6 +413,9 @@ export interface Meal {
   carbs: number;
   fat: number;
   photoUrl?: string;
+  source?: MealSource;
+  status?: MealStatus;
+  items?: MealItem[];
   createdAt: string;
 }
 
@@ -440,6 +546,8 @@ export interface ShoppingItem {
 }
 
 export interface DailyNutritionSummary {
+  /** Estimated daily energy need before goal adjustment. */
+  estimatedDailyNeed?: number;
   calorieGoal: number;
   consumedCalories: number;
   remainingCalories: number;
@@ -450,6 +558,9 @@ export interface DailyNutritionSummary {
   analyzedMealCalories: number;
   completedShakeCalories: number;
   consumedShakeCalories?: number;
+  targetProtein?: number;
+  targetCarbs?: number;
+  targetFat?: number;
 }
 
 // Full application export/import backup schema
@@ -470,4 +581,8 @@ export interface AppStorageSchema {
   weights: WeightEntry[];
   shiftSchedules: ShiftSchedule[];
   shoppingCheckedIds: string[];
+  dailyActivities?: Record<string, DailyActivity>;
+  entitlement?: Entitlement;
+  usageLimits?: Record<string, number>;
+  rewardCredits?: Record<string, number>;
 }

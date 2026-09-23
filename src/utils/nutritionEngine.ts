@@ -203,60 +203,179 @@ export function calculateDailyNutrition(
 }
 
 export interface CalorieNeedsEstimate {
+  bmrCalories: number;
   maintenanceCalories: number;
   recommendedGoal: number;
   proteinGoal: number;
-  monthlyWeightGoalKg: number;
-  dailySurplusKcal: number;
+  dailyAdjustmentKcal: number;
+  targetPaceKgPerWeek: number;
   projectionDisclaimer: string;
 }
 
+export interface CalorieNeedsActivityInput {
+  workMovement?: UserProfile['workMovement'];
+  sportType?: UserProfile['sportType'];
+  sportDaysPerWeek?: number;
+  sportMinutesPerSession?: number;
+  sportIntensity?: UserProfile['sportIntensity'];
+  generalMovement?: UserProfile['generalMovement'];
+  status?: 'normal' | 'working' | 'off' | 'more_active' | 'less_active';
+}
+
 /**
- * Scientific calorie estimation using Mifflin-St Jeor formula
- * Targets core goal of +5 KG / month (~1250-1280 kcal/day caloric surplus)
- * Clear guidance that this is a projection / target, not a medical prescription.
+ * Estimates BMR, maintenance energy and a goal-adjusted daily calorie target.
+ *
+ * New model:
+ *   BMR -> work/general movement -> weekly sport contribution -> daily status -> goal adjustment
+ *
+ * The goal adjustment is derived from the selected target pace rather than a
+ * hard-coded +5 kg/month assumption. It is capped to keep the generated target
+ * from becoming an extreme automatic prescription.
+ *
+ * The fourth argument still accepts the legacy activityLevel string so existing
+ * callers keep working during the migration. New callers should pass the
+ * activity object instead.
  */
 export function estimateCalorieNeeds(
   weightKg: number,
   heightCm: number,
   targetWeightKg: number,
-  activityLevel: UserProfile['activityLevel'],
+  activity: UserProfile['activityLevel'] | CalorieNeedsActivityInput | undefined,
   age: number = 28,
-  monthlyTargetKg: number = 5
+  targetPace?: number,
+  gender: UserProfile['gender'] = 'male'
 ): CalorieNeedsEstimate {
-  // Base BMR estimate (gender neutral blend: 10 * W + 6.25 * H - 5 * A + 5)
-  const bmr = 10 * weightKg + 6.25 * heightCm - 5 * age + 5;
+  const safeWeight = Math.max(1, weightKg);
+  const safeHeight = Math.max(1, heightCm);
+  const safeAge = Math.max(1, age);
 
-  const activityMultipliers: Record<UserProfile['activityLevel'], number> = {
+  // Mifflin-St Jeor. Female/male constants are kept explicit instead of using
+  // the previous gender-neutral +5 formula.
+  const bmr =
+    10 * safeWeight +
+    6.25 * safeHeight -
+    5 * safeAge +
+    (gender === 'female' ? -161 : 5);
+
+  const isLegacyActivity = typeof activity === 'string' || activity == null;
+
+  const legacyMultipliers: Record<UserProfile['activityLevel'], number> = {
     sedentary: 1.2,
     light: 1.375,
     moderate: 1.55,
     very_active: 1.725,
   };
 
-  const maintenance = Math.round(bmr * (activityMultipliers[activityLevel] || 1.375));
+  const workMultipliers: Record<NonNullable<UserProfile['workMovement']>, number> = {
+    mostly_sitting: 1.2,
+    some_walking: 1.35,
+    mostly_standing_moving: 1.5,
+    heavy_physical: 1.65,
+  };
 
-  let goal = maintenance;
-  let dailySurplus = 0;
+  const generalMultipliers: Record<NonNullable<UserProfile['generalMovement']>, number> = {
+    mostly_home: 0.98,
+    some_walking: 1,
+    lots_of_walking: 1.05,
+  };
 
-  if (targetWeightKg > weightKg) {
-    // Core Target: +5 KG / month -> ~1250 - 1283 kcal/day surplus (7700 kcal * 5 / 30)
-    dailySurplus = Math.round((monthlyTargetKg * 7700) / 30);
-    goal = maintenance + dailySurplus;
-  } else if (targetWeightKg < weightKg) {
-    dailySurplus = -400;
-    goal = Math.max(1400, maintenance - 400);
+  const sportMet: Record<NonNullable<UserProfile['sportType']>, number> = {
+    none: 0,
+    fitness_weights: 5,
+    running: 8,
+    walking: 3.5,
+    cycling: 6,
+    football: 7,
+    basketball: 7,
+    swimming: 6,
+    tennis: 7,
+    martial_arts: 8,
+    pilates: 3,
+    other: 5,
+  };
+
+  const intensityMultiplier: Record<NonNullable<UserProfile['sportIntensity']>, number> = {
+    low: 0.85,
+    medium: 1,
+    high: 1.15,
+  };
+
+  let maintenance: number;
+
+  if (isLegacyActivity) {
+    const legacyLevel = (activity || 'light') as UserProfile['activityLevel'];
+    maintenance = bmr * (legacyMultipliers[legacyLevel] || legacyMultipliers.light);
+  } else {
+    const input = activity as CalorieNeedsActivityInput;
+    const workFactor = workMultipliers[input.workMovement || 'some_walking'];
+    const generalFactor = generalMultipliers[input.generalMovement || 'some_walking'];
+
+    // Work/general movement establish the daily baseline. Sport is then added
+    // as a weekly-average net contribution so it is not double-counted.
+    const baseline = bmr * workFactor * generalFactor;
+    const days = Math.min(7, Math.max(0, input.sportDaysPerWeek || 0));
+    const minutes = Math.min(240, Math.max(0, input.sportMinutesPerSession || 0));
+    const met = sportMet[input.sportType || 'none'] || 0;
+    const intensity = intensityMultiplier[input.sportIntensity || 'medium'];
+
+    // Net exercise calories: remove the ~1 MET resting component because the
+    // baseline already represents a full day of energy expenditure.
+    const netSportKcalPerSession = met > 0
+      ? Math.max(0, (met - 1) * 3.5 * safeWeight / 200 * minutes * intensity)
+      : 0;
+    const weeklySportKcal = netSportKcalPerSession * days;
+    const dailySportKcal = weeklySportKcal / 7;
+
+    maintenance = baseline + dailySportKcal;
+
+    const status = input.status || 'normal';
+    const statusMultiplier: Record<NonNullable<CalorieNeedsActivityInput['status']>, number> = {
+      normal: 1,
+      working: 1,
+      off: 0.92,
+      more_active: 1.08,
+      less_active: 0.94,
+    };
+    maintenance *= statusMultiplier[status];
   }
 
-  // Protein estimate: ~1.8g per kg of body weight
-  const proteinGoal = Math.round(weightKg * 1.8);
+  const maintenanceCalories = Math.max(1200, Math.round(maintenance));
+
+  // Target pace is kg/month for the existing UI unless a weekly pace is passed
+  // through a future caller. For now the legacy positional argument remains
+  // interpreted as kg/month, but no default of +5 kg/month is used.
+  const safeMonthlyPace = Math.min(2, Math.max(0, targetPace ?? 1));
+  const targetPaceKgPerWeek = safeMonthlyPace / 4.345;
+
+  let dailyAdjustmentKcal = 0;
+
+  if (targetWeightKg > weightKg) {
+    dailyAdjustmentKcal = Math.round((safeMonthlyPace * 7700) / 30);
+  } else if (targetWeightKg < weightKg) {
+    dailyAdjustmentKcal = -Math.round((safeMonthlyPace * 7700) / 30);
+  }
+
+  // Keep automatic targets within a controlled range. Users can still override
+  // the final calorie goal through the existing custom-calorie setting.
+  dailyAdjustmentKcal = Math.max(-750, Math.min(750, dailyAdjustmentKcal));
+
+  const recommendedGoal = Math.max(
+    1200,
+    Math.round(maintenanceCalories + dailyAdjustmentKcal)
+  );
+
+  // Protein remains only a compatibility value here; the dedicated macro engine
+  // will become the source of truth in the next phase.
+  const proteinGoal = Math.round(safeWeight * 1.6);
 
   return {
-    maintenanceCalories: maintenance,
-    recommendedGoal: goal,
+    bmrCalories: Math.round(bmr),
+    maintenanceCalories,
+    recommendedGoal,
     proteinGoal,
-    monthlyWeightGoalKg: monthlyTargetKg,
-    dailySurplusKcal: dailySurplus,
-    projectionDisclaimer: 'Hedeflenen aylık artış: +5 kg (~1280 kcal/gün planlı kalori fazlası). Bu plan bir hedef ve bilimsel enerji projeksiyonudur; bireysel metabolizma hızınıza, vardiya temponuza ve günlük hareketliliğe bağlı olarak gerçek artış değişkenlik gösterebilir.',
+    dailyAdjustmentKcal,
+    targetPaceKgPerWeek: Math.round(targetPaceKgPerWeek * 100) / 100,
+    projectionDisclaimer:
+      'Kalori hedefi BMR, günlük hareketlilik ve spor verilerinden tahmin edilir. Kilo hedefi için kullanılan enerji ayarı seçilen hedef temposuna göre hesaplanır; sonuç tahmini bir günlük hedeftir, kesin enerji harcaması değildir.',
   };
 }

@@ -1,7 +1,6 @@
 import { DailyPlan, Shake, UserProfile, MealAnalysis, DailyShake } from '../types';
 import { composeThreeDistinctDailyShakes, composeDeterministicShake } from './recipeCompositionEngine';
 import { getStoredProfile, saveDailyPlan } from '../storage/storageAbstraction';
-import { DAILY_TARGET_KCAL } from '../constants/calorieTargets';
 
 export interface PlanOptions {
   date?: string;
@@ -9,25 +8,29 @@ export interface PlanOptions {
 }
 
 /**
- * Calculates optimal daily shake calories.
- * Strictly adheres to Rule 1:
- * abs(shakeTotalKcal - dailyTargetKcal) <= 300 kcal.
+ * Calculates the daily shake target from the user's calculated daily energy target.
  *
- * Example:
- * Total Daily Goal: ~3200 kcal
- * Daily Shake Total Target: ~3200 kcal (Acceptable range: 2900 - 3500 kcal)
- *   Portion 1 (50%): ~1600 kcal
- *   Portion 2 (50%): ~1600 kcal
+ * The daily calorie target belongs to the whole-day nutrition model. The shake
+ * is intentionally kept slightly below that target so it is not forced to equal
+ * the entire day's calories. Main meals and other real consumption remain
+ * separately tracked by the daily nutrition system.
  *
- * Main meal calories are tracked independently and are NOT subtracted from the shake target.
- * 
- * Formula: Math.max(DAILY_TARGET_KCAL, userProfile?.calorieGoal || 0)
- * - If profile.calorieGoal is undefined or < DAILY_TARGET_KCAL: returns DAILY_TARGET_KCAL (3200)
- * - If profile.calorieGoal is > DAILY_TARGET_KCAL: returns profile.calorieGoal
- * - Result is never below DAILY_TARGET_KCAL
+ * Rule: keep the generated daily shake 200–300 kcal below the daily target.
+ * A 250 kcal gap is used as the deterministic midpoint.
  */
 export function calculateOptimalDailyShakeKcal(userProfile?: UserProfile | null): number {
-  return Math.max(DAILY_TARGET_KCAL, userProfile?.calorieGoal || 0);
+  const dailyTarget = Math.round(
+    Number(userProfile?.calorieGoal || userProfile?.maintenanceCalories || 0)
+  );
+
+  if (!Number.isFinite(dailyTarget) || dailyTarget <= 0) return 0;
+
+  const gapKcal = 250;
+  const target = dailyTarget - gapKcal;
+
+  // Never turn a valid daily target into a zero/negative shake target.
+  // No legacy 2500/3200 kcal floor is applied here.
+  return Math.max(300, Math.round(target));
 }
 
 /**
@@ -37,7 +40,8 @@ export function calculateOptimalDailyShakeKcal(userProfile?: UserProfile | null)
  * 1. Produces at least 3 distinct candidates satisfying all 12 rules.
  * 2. Selected master recipe is divided into 2 equal portions: 1. Öğün (50%) and 2. Öğün (50%).
  * 3. Ties candidateShakes and selectedShakeId to the plan.
- * 4. Main meal calories are tracked separately and DO NOT shrink the shake plan.
+ * 4. Main meal calories are tracked separately; they do not mutate the selected shake recipe.
+ * 5. The shake target is derived from the user's daily calorie target, not a fixed 3200 kcal constant.
  */
 export function generateDailyPlan(
   targetDate: string,
@@ -46,7 +50,7 @@ export function generateDailyPlan(
 ): DailyPlan {
   const userProfile = profile !== undefined ? profile : getStoredProfile();
   
-  // Planned shake target matches dailyTargetKcal: ~3200 kcal (+-300 kcal)
+  // Shake target is derived from the calculated daily target and kept ~250 kcal below it.
   const targetShakesKcal = calculateOptimalDailyShakeKcal(userProfile);
 
   // Compose at least 3 distinct candidates
@@ -115,8 +119,8 @@ export function generateDailyPlan(
 
 /**
  * Re-evaluates completion states of the daily plan when a meal is logged.
- * Rule: Ana öğün kalorisi shake planının haftalık hedefinden düşülmez.
- * Shake planı kalori hedefinin temel yapıtaşı olarak sabit kalır.
+ * Meal calories do not mutate the already-generated shake recipe.
+ * The daily nutrition engine separately tracks meals + completed shake portions.
  */
 export function rebalancePlanWithMeals(
   plan: DailyPlan,

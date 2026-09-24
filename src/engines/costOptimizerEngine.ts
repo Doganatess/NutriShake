@@ -1,10 +1,13 @@
-import { Shake, ShakeIngredient, Ingredient } from '../types';
-import { INGREDIENT_MAP, INGREDIENTS_DATABASE } from '../data/ingredients';
+import { Shake, Ingredient } from '../types';
+import { INGREDIENT_MAP } from '../data/ingredients';
+import { canonicalIngredientId } from '../data/ingredients';
+import { getStoredStock, getStoredStockTransactions } from '../storage/storageAbstraction';
+import { resolveStockKey } from './stockEngine';
 
 export interface CostOptimizationResult {
-  totalEstimatedCost: number; // TL
-  costPer100Kcal: number; // TL / 100 kcal
-  costPer10gProtein: number; // TL / 10g protein
+  totalEstimatedCost: number;
+  costPer100Kcal: number;
+  costPer10gProtein: number;
   economicAlternatives: {
     originalIngredient: Ingredient;
     alternativeIngredient: Ingredient;
@@ -14,70 +17,167 @@ export interface CostOptimizationResult {
   }[];
 }
 
+type StockPriceLike = {
+  purchasePrice?: number;
+  price?: number;
+  unitPrice?: number;
+  pricePerUnit?: number;
+  purchaseUnit?: string;
+  priceUnit?: string;
+  amount?: number;
+  normalizedGramsOrMl?: number;
+};
+
+function normalizePriceUnit(unit?: string): string {
+  return String(unit || '').toLowerCase().replace(/\s+/g, '');
+}
+
 /**
- * Cost Optimizer Engine (Requirement 28)
- * Computes realistic cost per shake and suggests economically optimized local alternatives
- * with matching nutritional profiles.
+ * Converts a purchase price into TL per normalized gram/ml.
+ * Supports common stock-price shapes without requiring a new UI field.
+ * If no real user purchase price exists, returns 0 so the caller can fall back
+ * to the ingredient database's reference estimate.
+ */
+function stockPricePerNormalizedUnit(item: StockPriceLike | undefined): number {
+  if (!item) return 0;
+
+  const rawPrice = Number(
+    item.purchasePrice ?? item.unitPrice ?? item.pricePerUnit ?? item.price ?? 0
+  );
+  if (!Number.isFinite(rawPrice) || rawPrice <= 0) return 0;
+
+  const unit = normalizePriceUnit(item.purchaseUnit || item.priceUnit);
+
+  if (unit.includes('kg')) return rawPrice / 1000;
+  if (unit.includes('100g') || unit.includes('100ml')) return rawPrice / 100;
+  if (unit === 'g' || unit === 'gram' || unit === 'gramm') return rawPrice;
+  if (unit === 'ml' || unit === 'millilitre' || unit === 'milliliter') return rawPrice;
+
+  if (unit.includes('l') && !unit.includes('100')) return rawPrice / 1000;
+
+  // For adet/tane/ÅiÅe, infer the normalized size of the purchased stock item.
+  const normalizedAmount = Number(item.normalizedGramsOrMl ?? item.amount ?? 0);
+  if (normalizedAmount > 0) return rawPrice / normalizedAmount;
+
+  return 0;
+}
+
+function ingredientReferencePricePerGram(ingredient: Ingredient): number {
+  const price = Number(ingredient.estimatedPrice || 0);
+  if (!Number.isFinite(price) || price <= 0) return 0;
+
+  const unit = normalizePriceUnit(ingredient.priceUnit || 'TL/kg');
+  if (unit.includes('kg') || unit === 'l' || unit.includes('litre')) return price / 1000;
+  if (unit.includes('100g') || unit.includes('100ml')) return price / 100;
+
+  const serving = Number(ingredient.edibleWeight || ingredient.defaultServing || 100);
+  if (unit.includes('adet') || unit.includes('tane') || unit.includes('ÅiÅe')) {
+    return serving > 0 ? price / serving : 0;
+  }
+
+  return price / 1000;
+}
+
+/**
+ * Determines the real cost per normalized gram/ml for one ingredient.
+ * Priority:
+ * 1. User stock purchase price, when available.
+ * 2. Purchase transaction price, when available in transaction history.
+ * 3. Ingredient database reference estimate.
+ */
+function getActualPricePerGram(ingredient: Ingredient): number {
+  const canonical = canonicalIngredientId(ingredient.id);
+  const stock = getStoredStock();
+  const stockKey = resolveStockKey(stock, canonical);
+
+  if (stockKey) {
+    const stockItem = stock[stockKey] as StockPriceLike;
+    const stockPrice = stockPricePerNormalizedUnit(stockItem);
+    if (stockPrice > 0) return stockPrice;
+  }
+
+  const transactions = getStoredStockTransactions();
+  const purchases = (transactions || [])
+    .filter((tx: any) =>
+      tx?.type === 'purchase' && canonicalIngredientId(String(tx.ingredientId || '')) === canonical
+    )
+    .map((tx: any) => {
+      const price = Number(tx.purchasePrice ?? tx.price ?? tx.totalPrice ?? 0);
+      const amount = Number(tx.normalizedGramsOrMl ?? 0);
+      return price > 0 && amount > 0 ? price / amount : 0;
+    })
+    .filter((value: number) => value > 0);
+
+  if (purchases.length > 0) {
+    // Most recent usable purchase price is the best representation of the user's
+    // current cost when transaction history contains explicit purchase prices.
+    return purchases[purchases.length - 1];
+  }
+
+  return ingredientReferencePricePerGram(ingredient);
+}
+
+function calculateShakeActualCost(shake: Shake): number {
+  return shake.ingredients.reduce((sum, item) => {
+    const ingredientId = canonicalIngredientId(item.ingredientId);
+    const ingredient = INGREDIENT_MAP[ingredientId] || INGREDIENT_MAP[item.ingredientId];
+    if (!ingredient) return sum;
+
+    const pricePerGram = getActualPricePerGram(ingredient);
+    if (pricePerGram <= 0) return sum;
+
+    return sum + pricePerGram * Math.max(0, Number(item.amount || 0));
+  }, 0);
+}
+
+/**
+ * Calculates actual shake cost using the user's stock purchase price when one
+ * exists, otherwise the ingredient database reference price.
  */
 export function optimizeShakeCost(shake: Shake): CostOptimizationResult {
-  const totalCost = shake.estimatedCost || 0;
-  const totalKcal = shake.estimatedCalories || 1;
-  const totalProtein = shake.protein || 1;
+  const totalCost = calculateShakeActualCost(shake);
+  const totalKcal = Math.max(1, Number(shake.estimatedCalories || 0));
+  const totalProtein = Math.max(1, Number(shake.protein || 0));
 
-  const costPer100Kcal = Math.round((totalCost / (totalKcal / 100)) * 10) / 10;
-  const costPer10gProtein = Math.round((totalCost / (totalProtein / 10)) * 10) / 10;
+  const costPer100Kcal = Math.round((totalCost / (totalKcal / 100)) * 100) / 100;
+  const costPer10gProtein = Math.round((totalCost / (totalProtein / 10)) * 100) / 100;
 
+  // Do not invent fixed savings percentages. Alternatives are informational only;
+  // their savings are calculated from the same current pricing model.
   const economicAlternatives: CostOptimizationResult['economicAlternatives'] = [];
 
   shake.ingredients.forEach((item) => {
-    const ing = INGREDIENT_MAP[item.ingredientId];
-    if (!ing) return;
+    const original = INGREDIENT_MAP[canonicalIngredientId(item.ingredientId)] || INGREDIENT_MAP[item.ingredientId];
+    if (!original) return;
 
-    // Example 1: Imported chia vs domestic flax seed (Keten tohumu)
-    if (ing.id === 'chia_seeds') {
-      const flax = INGREDIENT_MAP['flax_seeds'];
-      if (flax) {
-        economicAlternatives.push({
-          originalIngredient: ing,
-          alternativeIngredient: flax,
-          estimatedSavingsTL: Math.round(((ing.estimatedPrice - flax.estimatedPrice) * (item.amount / 100)) * 10) / 10,
-          savingsPercent: 45,
-          reason: 'Keten tohumu, yerli üretim olup benzer omega-3 ve lif değerini daha ekonomik fiyata sağlar.',
-        });
-      }
-    }
+    const alternativeIds: string[] = [];
+    if (original.id === 'chia_seeds') alternativeIds.push('flax_seeds');
+    if (original.id === 'cashew_nuts') alternativeIds.push('roasted_hazelnuts');
+    if (original.id === 'chestnut_honey' || original.id === 'flower_honey') alternativeIds.push('grape_molasses');
 
-    // Example 2: Walnut / Cashew vs Roasted Hazelnut (Yerli Ordu Fındığı)
-    if (ing.id === 'cashew_nuts') {
-      const hazelnut = INGREDIENT_MAP['roasted_hazelnuts'];
-      if (hazelnut) {
-        economicAlternatives.push({
-          originalIngredient: ing,
-          alternativeIngredient: hazelnut,
-          estimatedSavingsTL: Math.round(((ing.estimatedPrice - hazelnut.estimatedPrice) * (item.amount / 100)) * 10) / 10,
-          savingsPercent: 35,
-          reason: 'Ordu yerli kavrulmuş fındığı, ithal kajudan çok daha taze ve ekonomik bir yağ/mineral kaynağıdır.',
-        });
-      }
-    }
+    for (const alternativeId of alternativeIds) {
+      const alternative = INGREDIENT_MAP[alternativeId];
+      if (!alternative) continue;
 
-    // Example 3: Honey vs Homemade/Village Molasses (Pekmez)
-    if (ing.id === 'chestnut_honey') {
-      const grapeMolasses = INGREDIENT_MAP['grape_molasses'];
-      if (grapeMolasses) {
-        economicAlternatives.push({
-          originalIngredient: ing,
-          alternativeIngredient: grapeMolasses,
-          estimatedSavingsTL: Math.round(((ing.estimatedPrice - grapeMolasses.estimatedPrice) * (item.amount / 100)) * 10) / 10,
-          savingsPercent: 60,
-          reason: 'Geleneksel üzüm veya dut pekmezi, kestane balına kıyasla benzer demir ve enerji profilini çok daha bütçe dostu sunar.',
-        });
-      }
+      const originalPrice = getActualPricePerGram(original);
+      const alternativePrice = getActualPricePerGram(alternative);
+      if (originalPrice <= 0 || alternativePrice <= 0 || alternativePrice >= originalPrice) continue;
+
+      const savings = (originalPrice - alternativePrice) * Math.max(0, Number(item.amount || 0));
+      const savingsPercent = originalPrice > 0 ? (savings / (originalPrice * Math.max(0.0001, Number(item.amount || 0)))) * 100 : 0;
+
+      economicAlternatives.push({
+        originalIngredient: original,
+        alternativeIngredient: alternative,
+        estimatedSavingsTL: Math.round(savings * 100) / 100,
+        savingsPercent: Math.round(savingsPercent * 10) / 10,
+        reason: 'Mevcut fiyat verisine gÃ¶re daha dÃ¼ÅÃ¼k maliyetli alternatif.',
+      });
     }
   });
 
   return {
-    totalEstimatedCost: Math.round(totalCost * 10) / 10,
+    totalEstimatedCost: Math.round(totalCost * 100) / 100,
     costPer100Kcal,
     costPer10gProtein,
     economicAlternatives,
@@ -90,31 +190,34 @@ export interface CostSavingTip {
   explanation: string;
 }
 
+/**
+ * Returns neutral cost-saving alternatives without claiming a fixed percentage.
+ */
 export function getCostSavingSuggestions(ingredientIds: string[]): CostSavingTip[] {
   const tips: CostSavingTip[] = [];
-  const idSet = new Set(ingredientIds);
+  const idSet = new Set(ingredientIds.map((id) => canonicalIngredientId(id)));
 
   if (idSet.has('chia_seeds')) {
     tips.push({
       originalName: 'Chia Tohumu',
-      alternativeName: 'Yerli Keten Tohumu',
-      explanation: 'Benzer lif ve omega-3 profili sunar, yerli üretim olduğundan bütçenizi korur.',
+      alternativeName: 'Keten Tohumu',
+      explanation: 'FiyatÄ± mevcut stok/fiyat verisine gÃ¶re daha dÃ¼ÅÃ¼kse maliyeti azaltmak iÃ§in deÄerlendirilebilir.',
     });
   }
 
   if (idSet.has('cashew_nuts') || idSet.has('walnuts')) {
     tips.push({
-      originalName: 'İthal Kaju / Ceviz',
-      alternativeName: 'Kavrulmuş Ordu Fındığı',
-      explanation: 'Taze Karadeniz fındığı zengin E vitamini ve sağlıklı yağ profiliyle hem daha tazedir hem daha ekonomiktir.',
+      originalName: 'Kaju / Ceviz',
+      alternativeName: 'KavrulmuÅ FÄ±ndÄ±k',
+      explanation: 'Mevcut fiyat verisine gÃ¶re daha dÃ¼ÅÃ¼k maliyetli ise ekonomik alternatif olarak deÄerlendirilebilir.',
     });
   }
 
   if (idSet.has('chestnut_honey') || idSet.has('flower_honey')) {
     tips.push({
       originalName: 'Bal',
-      alternativeName: 'Köy Pekmezi (Dut / Üzüm)',
-      explanation: 'Geleneksel pekmez yüksek demir ve mineral içeriğiyle zenginleştirir ve daha uygun maliyetlidir.',
+      alternativeName: 'Pekmez',
+      explanation: 'Mevcut fiyat verisine gÃ¶re daha dÃ¼ÅÃ¼k maliyetli ise ekonomik alternatif olarak deÄerlendirilebilir.',
     });
   }
 

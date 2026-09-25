@@ -10,6 +10,9 @@ export interface GeneratePlanPayload {
   dailyGoalKcal: number;
   consumedMealsKcal: number;
   remainingKcalNeeded: number;
+  remainingProtein?: number;
+  remainingCarbs?: number;
+  remainingFat?: number;
   shakeCount: number;
   portionPreference: PortionPreference;
   mandatoryIngredientIds: string[];

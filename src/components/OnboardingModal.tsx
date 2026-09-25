@@ -6,12 +6,12 @@ import { saveStoredProfile, saveWeightEntry, getTodayDateString } from '../store
 
 interface OnboardingModalProps {
   onComplete: (profile: UserProfile) => void;
-  onNavigateToIngredients: () => void;
+  onNavigateToToday: () => void;
 }
 
 export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   onComplete,
-  onNavigateToIngredients,
+  onNavigateToToday,
 }) => {
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
@@ -76,7 +76,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     });
 
     onComplete(newProfile);
-    onNavigateToIngredients();
+    onNavigateToToday();
   };
 
   return (

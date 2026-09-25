@@ -1,6 +1,5 @@
 import type { Request, Response } from 'express';
 import { generateDailyShakePlan, generateDeterministicDailyPlan } from '../src/server/geminiService.js';
-import { DAILY_TARGET_KCAL } from '../src/constants/calorieTargets.js';
 import { checkRateLimit, deduplicateRequest, getRequestClientKey } from '../src/server/aiProvider.js';
 
 export default async function handler(req: Request, res: Response) {
@@ -42,12 +41,10 @@ export default async function handler(req: Request, res: Response) {
 
   const planParams = {
     date: date || new Date().toISOString().split('T')[0],
-    // FIX: previously defaulted to a hardcoded 2000 kcal and never enforced a floor,
-    // so any low/undefined client value silently became the shake's calorie target.
-    // Now the daily shake target can never fall below DAILY_TARGET_KCAL (3200).
-    dailyGoalKcal: Math.max(DAILY_TARGET_KCAL, Number(dailyGoalKcal) || 0),
+    // Daily goal is the whole-day target; remainingKcalNeeded is the shake planner input.
+    dailyGoalKcal: Math.max(0, Number(dailyGoalKcal) || 0),
     consumedMealsKcal: Number(consumedMealsKcal) || 0,
-    remainingKcalNeeded: Number(remainingKcalNeeded) || 800,
+    remainingKcalNeeded: Math.max(0, Number(remainingKcalNeeded) || 0),
     shakeCount: Math.min(2, Math.max(1, Number(shakeCount) || 1)),
     portionPreference: portionPreference || 'medium',
     mandatoryIngredientIds: Array.isArray(mandatoryIngredientIds) ? mandatoryIngredientIds : [],
@@ -57,6 +54,9 @@ export default async function handler(req: Request, res: Response) {
     dislikedShakeNames: Array.isArray(dislikedShakeNames) ? dislikedShakeNames : [],
     favoriteShakeNames: Array.isArray(favoriteShakeNames) ? favoriteShakeNames : [],
     userStock: userStock && typeof userStock === 'object' ? userStock : undefined,
+    remainingProtein: Number.isFinite(Number(body.remainingProtein)) ? Math.max(0, Number(body.remainingProtein)) : undefined,
+    remainingCarbs: Number.isFinite(Number(body.remainingCarbs)) ? Math.max(0, Number(body.remainingCarbs)) : undefined,
+    remainingFat: Number.isFinite(Number(body.remainingFat)) ? Math.max(0, Number(body.remainingFat)) : undefined,
   };
 
   try {

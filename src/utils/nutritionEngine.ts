@@ -1,6 +1,7 @@
 import { INGREDIENT_MAP, normalizeTurkish } from '../data/ingredients.js';
 import { normalizeQuantityToGrams } from './unitConverter.js';
-import { ShakeIngredient, DailyPlan, MealAnalysis, UserProfile, DailyNutritionSummary } from '../types.js';
+import { ShakeIngredient, DailyPlan, MealAnalysis, UserProfile, DailyNutritionSummary, DailyActivity } from '../types.js';
+import { calculateMacroTargets } from '../engines/macroEngine.js';
 
 /**
  * Normalizes Turkish characters and lowercases for accurate instant search.
@@ -135,10 +136,36 @@ export function calculateShakeNutrition(ingredients: ShakeIngredient[]) {
 export function calculateDailyNutrition(
   profile: UserProfile | null,
   plan: DailyPlan | null,
-  meals: MealAnalysis[]
+  meals: MealAnalysis[],
+  dailyActivity?: DailyActivity | null
 ): DailyNutritionSummary {
-  const calorieGoal = profile?.calorieGoal || 2000;
-  const proteinGoal = profile?.proteinGoal || 100;
+  let calorieGoal = profile?.calorieGoal || 2000;
+  let estimatedDailyNeed = profile?.maintenanceCalories;
+  let goalAdjustmentKcal = profile?.goalSettings?.adjustmentKcal ?? profile?.dailySurplusKcal ?? 0;
+  if (profile && dailyActivity) {
+    const pace = profile.goalSettings?.targetPaceUnit === 'kg_per_week'
+      ? (profile.goalSettings.targetPace || 0) * 4.345
+      : (profile.goalSettings?.targetPace ?? profile.monthlyWeightGoalKg ?? 0);
+    const estimate = estimateCalorieNeeds(
+      profile.currentWeight, profile.height, profile.targetWeight,
+      {
+        workMovement: dailyActivity.workMovement || profile.workMovement,
+        sportType: dailyActivity.sportType || profile.sportType,
+        sportDaysPerWeek: dailyActivity.sportDaysPerWeek ?? profile.sportDaysPerWeek,
+        sportMinutesPerSession: dailyActivity.sportMinutesPerSession ?? profile.sportMinutesPerSession,
+        sportIntensity: dailyActivity.sportIntensity || profile.sportIntensity,
+        generalMovement: dailyActivity.generalMovement || profile.generalMovement,
+        status: dailyActivity.status || 'normal',
+      },
+      profile.age, pace, profile.gender
+    );
+    estimatedDailyNeed = estimate.estimatedDailyNeed;
+    goalAdjustmentKcal = estimate.goalAdjustmentKcal;
+    calorieGoal = profile.isCustomCalorieGoal ? profile.calorieGoal : estimate.recommendedGoal;
+  }
+
+  const macroTargets = profile ? calculateMacroTargets(profile) : { protein: 100, carbs: 250, fat: 70 };
+  const proteinGoal = macroTargets.protein;
 
   // Analyzed meals total
   let analyzedMealCalories = 0;
@@ -189,6 +216,7 @@ export function calculateDailyNutrition(
   const remainingCalories = Math.max(0, calorieGoal - consumedCalories);
 
   return {
+    estimatedDailyNeed: estimatedDailyNeed || undefined,
     calorieGoal,
     consumedCalories,
     remainingCalories,
@@ -196,6 +224,10 @@ export function calculateDailyNutrition(
     proteinGoal,
     consumedCarbs,
     consumedFat,
+    targetProtein: macroTargets.protein,
+    targetCarbs: macroTargets.carbs,
+    targetFat: macroTargets.fat,
+    goalAdjustmentKcal,
     analyzedMealCalories,
     completedShakeCalories,
     consumedShakeCalories: completedShakeCalories,
@@ -204,8 +236,10 @@ export function calculateDailyNutrition(
 
 export interface CalorieNeedsEstimate {
   bmrCalories: number;
+  estimatedDailyNeed: number;
   maintenanceCalories: number;
   recommendedGoal: number;
+  goalAdjustmentKcal: number;
   proteinGoal: number;
   dailyAdjustmentKcal: number;
   targetPaceKgPerWeek: number;
@@ -370,6 +404,7 @@ export function estimateCalorieNeeds(
 
   return {
     bmrCalories: Math.round(bmr),
+    estimatedDailyNeed: maintenanceCalories,
     maintenanceCalories,
     recommendedGoal,
     proteinGoal,

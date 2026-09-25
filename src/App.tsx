@@ -2,8 +2,9 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   Home,
   Sparkles,
-  Layers,
-  History,
+  Utensils,
+  Package,
+  TrendingUp,
   Settings,
   WifiOff,
   AlertTriangle,
@@ -25,6 +26,7 @@ import {
   getStoredPreferences,
   getStoredDislikedShakes,
   getStoredFavorites,
+  getStoredWeights,
 } from './store/storage';
 import { calculateDailyNutrition } from './utils/nutritionEngine';
 import { generateDailyPlanApi } from './services/apiClient';
@@ -37,11 +39,12 @@ import { TodayView } from './views/TodayView';
 import { PlanView } from './views/PlanView';
 import { IngredientsView } from './views/IngredientsView';
 import { HistoryView } from './views/HistoryView';
+import { StatisticsView } from './views/StatisticsView';
 import { SettingsView } from './views/SettingsView';
 import { OnboardingModal } from './components/OnboardingModal';
 import { PWAInstallBanner } from './components/PWAInstallBanner';
 
-type TabType = 'today' | 'plan' | 'ingredients' | 'history' | 'settings';
+type TabType = 'today' | 'shake' | 'nutrition' | 'stock' | 'progress' | 'settings';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('today');
@@ -137,7 +140,7 @@ export default function App() {
       setGlobalError(
         'Kıvam ve besin dengesi için kilerinizde en az bir süt ürünü (Tam Yağlı Süt, Yarım Yağlı Süt, Köy Yoğurdu veya Süzme Yoğurt) bulunmalıdır. Lütfen önce Malzemeler / Kiler sekmesine gidip bu ürünlerden en az birini ekleyin.'
       );
-      setActiveTab('ingredients');
+      setActiveTab('stock');
       return;
     }
 
@@ -207,7 +210,7 @@ export default function App() {
 
       saveDailyPlan(plan);
       setDailyPlan(plan);
-      setActiveTab('plan');
+      setActiveTab('shake');
     } catch (err: unknown) {
       // Intentionally cancelled because a newer request superseded this one — not a
       // real failure, so no error message and no deterministic fallback.
@@ -219,7 +222,7 @@ export default function App() {
       try {
         const fallbackPlan = generateDailyPlan(todayStr, profile, { meals: todayMeals });
         setDailyPlan(fallbackPlan);
-        setActiveTab('plan');
+        setActiveTab('shake');
       } catch (fallbackErr) {
         console.error('Deterministic plan failed:', fallbackErr);
         const msg = fallbackErr instanceof Error ? fallbackErr.message : (err instanceof Error ? err.message : 'Plan oluşturulamadı.');
@@ -248,6 +251,18 @@ export default function App() {
   const activePreferenceNotes = useMemo(() => {
     return getStoredPreferences().map((p) => p.note);
   }, []);
+
+  if (!profile) {
+    return (
+      <OnboardingModal
+        onComplete={(newProfile) => {
+          setProfile(newProfile);
+          setActiveTab('today');
+        }}
+        onNavigateToToday={() => setActiveTab('today')}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-stone-50 text-stone-900 flex flex-col antialiased selection:bg-emerald-100 selection:text-emerald-900 font-sans">
@@ -313,14 +328,14 @@ export default function App() {
                   plan={dailyPlan}
                   meals={todayMeals}
                   nutritionSummary={nutritionSummary}
-                  onNavigateToPlan={() => setActiveTab('plan')}
+                  onNavigateToPlan={() => setActiveTab('shake')}
                   onRefreshData={handleRefreshData}
                   onRequestGeneratePlan={handleGeneratePlan}
                   isGeneratingPlan={isGeneratingPlan}
                 />
               )}
 
-              {activeTab === 'plan' && (
+              {activeTab === 'shake' && (
                 <PlanView
                   profile={profile}
                   plan={dailyPlan}
@@ -333,7 +348,7 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'ingredients' && (
+              {activeTab === 'stock' && (
                 <IngredientsView
                   ingredientStates={ingredientStates}
                   onUpdateStates={(newStates) => {
@@ -342,10 +357,19 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'history' && (
+              {activeTab === 'nutrition' && (
                 <HistoryView
                   profile={profile}
                   onRefreshData={handleRefreshData}
+                />
+              )}
+
+              {activeTab === 'progress' && (
+                <StatisticsView
+                  profile={profile}
+                  dailyPlans={getStoredDailyPlans()}
+                  meals={allMeals}
+                  weights={getStoredWeights()}
                 />
               )}
 
@@ -392,39 +416,51 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setActiveTab('plan')}
+            onClick={() => setActiveTab('shake')}
             className={`flex flex-col items-center justify-center py-1 px-3 rounded-2xl transition active:scale-95 ${
-              activeTab === 'plan'
+              activeTab === 'shake'
                 ? 'text-emerald-700 font-bold'
                 : 'text-stone-500 font-medium hover:text-stone-800'
             }`}
           >
             <Sparkles className="w-5 h-5 mb-0.5" />
-            <span className="text-[10px] tracking-tight">Plan</span>
+            <span className="text-[10px] tracking-tight">Shake</span>
           </button>
 
           <button
-            onClick={() => setActiveTab('ingredients')}
+            onClick={() => setActiveTab('stock')}
             className={`flex flex-col items-center justify-center py-1 px-3 rounded-2xl transition active:scale-95 ${
-              activeTab === 'ingredients'
+              activeTab === 'stock'
                 ? 'text-emerald-700 font-bold'
                 : 'text-stone-500 font-medium hover:text-stone-800'
             }`}
           >
-            <Layers className="w-5 h-5 mb-0.5" />
-            <span className="text-[10px] tracking-tight">Malzemeler</span>
+            <Package className="w-5 h-5 mb-0.5" />
+            <span className="text-[10px] tracking-tight">Stok</span>
           </button>
 
           <button
-            onClick={() => setActiveTab('history')}
+            onClick={() => setActiveTab('nutrition')}
             className={`flex flex-col items-center justify-center py-1 px-3 rounded-2xl transition active:scale-95 ${
-              activeTab === 'history'
+              activeTab === 'nutrition'
                 ? 'text-emerald-700 font-bold'
                 : 'text-stone-500 font-medium hover:text-stone-800'
             }`}
           >
-            <History className="w-5 h-5 mb-0.5" />
-            <span className="text-[10px] tracking-tight">Geçmiş</span>
+            <Utensils className="w-5 h-5 mb-0.5" />
+            <span className="text-[10px] tracking-tight">Beslenme</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('progress')}
+            className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-2xl transition active:scale-95 ${
+              activeTab === 'progress'
+                ? 'text-emerald-700 font-bold'
+                : 'text-stone-500 font-medium hover:text-stone-800'
+            }`}
+          >
+            <TrendingUp className="w-5 h-5 mb-0.5" />
+            <span className="text-[10px] tracking-tight">İlerleme</span>
           </button>
 
           <button
@@ -441,17 +477,6 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Onboarding Modal (Opens if user profile is null on clean initial launch) */}
-      {!profile && (
-        <OnboardingModal
-          onComplete={(newProfile) => {
-            setProfile(newProfile);
-          }}
-          onNavigateToIngredients={() => {
-            setActiveTab('ingredients');
-          }}
-        />
-      )}
     </div>
   );
 }

@@ -352,8 +352,13 @@ export interface DailyPlan {
   date: string; // YYYY-MM-DD
   title?: string;
   notes?: string;
+  estimatedDailyNeed?: number;
+  goalAdjustmentKcal?: number;
   targetRemainingCalories?: number;
   targetCalories?: number;
+  consumedCalories?: number;
+  remainingCalories?: number;
+  macroTargets?: MacroTargets;
   totalCalories?: number;
   completedCalories?: number;
   isFullyCompleted?: boolean;
@@ -431,10 +436,10 @@ export interface MealAnalysis {
   estimatedCalories: number;
   calorieMin: number;
   calorieMax: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-  fiber?: number;
+  protein: number | null;
+  carbs: number | null;
+  fat: number | null;
+  fiber?: number | null;
   confidence: 'low' | 'medium' | 'high';
   detectedItems: DetectedFoodItem[];
   cookingStyleNotes?: string;
@@ -442,6 +447,8 @@ export interface MealAnalysis {
   needsClarification?: boolean;
   clarificationQuestion?: string;
   analysisSummary: string;
+  source?: MealSource;
+  status?: MealStatus;
   schemaVersion?: number;
   createdAt: string;
 }
@@ -561,6 +568,7 @@ export interface DailyNutritionSummary {
   targetProtein?: number;
   targetCarbs?: number;
   targetFat?: number;
+  goalAdjustmentKcal?: number;
 }
 
 // Full application export/import backup schema

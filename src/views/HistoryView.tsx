@@ -39,7 +39,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
   profile,
   onRefreshData,
 }) => {
-  const [subTab, setSubTab] = useState<'stats' | 'calendar' | 'weight'>('stats');
+  const [subTab, setSubTab] = useState<'stats' | 'calendar' | 'weight'>('calendar');
 
   // Calendar / Day selection
   const [selectedDate, setSelectedDate] = useState<string>(getTodayDateString());

@@ -312,7 +312,7 @@ export const PlanView: React.FC<PlanViewProps> = ({
       // too low (e.g. 900 kcal), every subsequent "replace" would target ~900 kcal again,
       // permanently perpetuating a low-calorie result. The replacement target must always
       // be the app's fixed daily target (currently 3200 kcal, floored at 2500).
-      const targetKcal = calculateOptimalDailyShakeKcal(profile);
+      const targetKcal = calculateOptimalDailyShakeKcal(profile, nutritionSummary.remainingCalories);
 
       let newShake: Shake;
 

@@ -71,7 +71,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
         : (plan.shakes.length === 1 ? plan.shakes[0] : null))
     : null;
 
-  const plannedShakeCalories = masterShake ? masterShake.estimatedCalories : (profile.dailySurplusKcal || 1000);
+  const plannedShakeCalories = masterShake ? masterShake.estimatedCalories : nutritionSummary.remainingCalories;
   const portion1Calories = masterShake
     ? (masterShake.portionCalories || Math.round(masterShake.estimatedCalories / 2))
     : Math.round(plannedShakeCalories / 2);
@@ -218,7 +218,7 @@ export const TodayView: React.FC<TodayViewProps> = ({
             Bugünün Beslenme Dengesi
           </span>
           <span className="text-[11px] text-stone-400">
-            Hedef: <strong className="text-white">{nutritionSummary.calorieGoal}</strong> kcal
+            Tahmini hedef: <strong className="text-white">{nutritionSummary.calorieGoal}</strong> kcal
           </span>
         </div>
 

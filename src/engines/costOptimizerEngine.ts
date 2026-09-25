@@ -55,7 +55,7 @@ function stockPricePerNormalizedUnit(item: StockPriceLike | undefined): number {
 
   if (unit.includes('l') && !unit.includes('100')) return rawPrice / 1000;
 
-  // For adet/tane/ÅiÅe, infer the normalized size of the purchased stock item.
+  // For adet/tane/şişe, infer the normalized size of the purchased stock item.
   const normalizedAmount = Number(item.normalizedGramsOrMl ?? item.amount ?? 0);
   if (normalizedAmount > 0) return rawPrice / normalizedAmount;
 
@@ -71,7 +71,7 @@ function ingredientReferencePricePerGram(ingredient: Ingredient): number {
   if (unit.includes('100g') || unit.includes('100ml')) return price / 100;
 
   const serving = Number(ingredient.edibleWeight || ingredient.defaultServing || 100);
-  if (unit.includes('adet') || unit.includes('tane') || unit.includes('ÅiÅe')) {
+  if (unit.includes('adet') || unit.includes('tane') || unit.includes('şişe')) {
     return serving > 0 ? price / serving : 0;
   }
 
@@ -171,7 +171,7 @@ export function optimizeShakeCost(shake: Shake): CostOptimizationResult {
         alternativeIngredient: alternative,
         estimatedSavingsTL: Math.round(savings * 100) / 100,
         savingsPercent: Math.round(savingsPercent * 10) / 10,
-        reason: 'Mevcut fiyat verisine gÃ¶re daha dÃ¼ÅÃ¼k maliyetli alternatif.',
+        reason: 'Mevcut fiyat verisine göre daha düşük maliyetli alternatif.',
       });
     }
   });
@@ -201,15 +201,15 @@ export function getCostSavingSuggestions(ingredientIds: string[]): CostSavingTip
     tips.push({
       originalName: 'Chia Tohumu',
       alternativeName: 'Keten Tohumu',
-      explanation: 'FiyatÄ± mevcut stok/fiyat verisine gÃ¶re daha dÃ¼ÅÃ¼kse maliyeti azaltmak iÃ§in deÄerlendirilebilir.',
+      explanation: 'Fiyatı mevcut stok/fiyat verisine göre daha düşükse maliyeti azaltmak için değerlendirilebilir.',
     });
   }
 
   if (idSet.has('cashew_nuts') || idSet.has('walnuts')) {
     tips.push({
       originalName: 'Kaju / Ceviz',
-      alternativeName: 'KavrulmuÅ FÄ±ndÄ±k',
-      explanation: 'Mevcut fiyat verisine gÃ¶re daha dÃ¼ÅÃ¼k maliyetli ise ekonomik alternatif olarak deÄerlendirilebilir.',
+      alternativeName: 'Kavrulmuş Fındık',
+      explanation: 'Mevcut fiyat verisine göre daha düşük maliyetli ise ekonomik alternatif olarak değerlendirilebilir.',
     });
   }
 
@@ -217,7 +217,7 @@ export function getCostSavingSuggestions(ingredientIds: string[]): CostSavingTip
     tips.push({
       originalName: 'Bal',
       alternativeName: 'Pekmez',
-      explanation: 'Mevcut fiyat verisine gÃ¶re daha dÃ¼ÅÃ¼k maliyetli ise ekonomik alternatif olarak deÄerlendirilebilir.',
+      explanation: 'Mevcut fiyat verisine göre daha düşük maliyetli ise ekonomik alternatif olarak değerlendirilebilir.',
     });
   }
 

@@ -52,7 +52,7 @@ export function isAllowedDairy(ingredientId: string): boolean {
 
 export class MissingDairyStockError extends Error {
   constructor(
-    message = 'KÄ±vam ve besin dengesi iÃ§in kilerinizde en az bir sÃ¼t Ã¼rÃ¼nÃ¼ (Tam YaÄlÄ± SÃ¼t, YarÄ±m YaÄlÄ± SÃ¼t, KÃ¶y YoÄurdu veya SÃ¼zme YoÄurt) bulunmalÄ±dÄ±r. LÃ¼tfen Kiler sekmesine gidip bu Ã¼rÃ¼nlerden en az birini ekleyin.'
+    message = 'Kıvam ve besin dengesi için kilerinizde en az bir süt ürünü (Tam Yağlı Süt, Yarım Yağlı Süt, Köy Yoğurdu veya Süzme Yoğurt) bulunmalıdır. Lütfen Kiler sekmesine gidip bu ürünlerden en az birini ekleyin.'
   ) {
     super(message);
     this.name = 'MissingDairyStockError';
@@ -66,7 +66,7 @@ export class InsufficientPantryStockError extends Error {
     const minAllowed = targetKcal - 300;
     const maxAllowed = targetKcal + 300;
     super(
-      `Kilerinizdeki mevcut stoklarla gÃ¼nlÃ¼k kalori hedefine (${minAllowed} - ${maxAllowed} kcal) ulaÅÄ±lamÄ±yor. Mevcut kiler kapasiteniz: ${availableKcal} kcal. LÃ¼tfen kilerinize kalori yoÄunluÄu yÃ¼ksek besinler (fÄ±ndÄ±k, ceviz, badem, yulaf, bal, pekmez, tam yaÄlÄ± sÃ¼t vb.) ekleyin.`
+      `Kilerinizdeki mevcut stoklarla günlük kalori hedefine (${minAllowed} - ${maxAllowed} kcal) ulaşılamıyor. Mevcut kiler kapasiteniz: ${availableKcal} kcal. Lütfen kilerinize kalori yoğunluğu yüksek besinler (fındık, ceviz, badem, yulaf, bal, pekmez, tam yağlı süt vb.) ekleyin.`
     );
     this.name = 'InsufficientPantryStockError';
     this.targetKcal = targetKcal;
@@ -212,7 +212,7 @@ export function getIngredientPricePerGram(ing: Ingredient): number {
   if (unitStr.includes('100g') || unitStr.includes('100 ml')) {
     return ing.estimatedPrice / 100;
   }
-  if (unitStr.includes('adet') || unitStr.includes('ÅiÅe') || unitStr.includes('tane')) {
+  if (unitStr.includes('adet') || unitStr.includes('şişe') || unitStr.includes('tane')) {
     const servingGrams = ing.edibleWeight || ing.defaultServing || 100;
     return ing.estimatedPrice / servingGrams;
   }
@@ -235,7 +235,7 @@ export function getIngredientCostPerKcal(ing: Ingredient): number {
  * Dynamically scales amounts to hit targetKcal (+-300 kcal) using the cheapest calories first.
  */
 // Thick (non-liquid) dairy bases need added water to reach a drinkable milkshake
-// consistency. Ratio is relative to the yogurt's own weight â strained yogurt is
+// consistency. Ratio is relative to the yogurt's own weight — strained yogurt is
 // drained and much thicker than village yogurt, so it needs proportionally more water.
 const YOGURT_WATER_RATIO: Record<string, number> = {
   dairy_strained_yogurt: 0.6,
@@ -415,25 +415,25 @@ function buildShakeFromIngredientCombo(
 
   const mainFruit = combo.find((i) => i.category === 'fruits' || i.category === 'dried_fruits');
   const mainNut = combo.find((i) => i.category === 'nuts');
-  const fruitName = mainFruit?.name.replace(/ \(.*\)/, '') || 'DoÄal';
+  const fruitName = mainFruit?.name.replace(/ \(.*\)/, '') || 'Doğal';
   const nutName = mainNut?.name.replace(/ \(.*\)/, '') || '';
-  const baseName = nutName ? `${fruitName}li & ${nutName}li Ãift Porsiyon Shake` : `${fruitName}li DoÄal Ãift Porsiyon Shake`;
+  const baseName = nutName ? `${fruitName}li & ${nutName}li Çift Porsiyon Shake` : `${fruitName}li Doğal Çift Porsiyon Shake`;
 
   const compatibility = analyzeCompatibility(shakeIngredients);
 
   const costString = finalNutrition.estimatedCost > 0 ? `~${finalNutrition.estimatedCost} TL` : 'Ekonomik';
   const whyChosenReasons: string[] = [
-    `Maliyet odaklÄ± formÃ¼lasyon: Toplam ${costString} maliyetle gereksiz malzeme kalabalÄ±ÄÄ± olmadan hazÄ±rlandÄ±`,
-    `GÃ¼nlÃ¼k hedefe tam uyumlu: Toplam ${totalCalories} kcal (2 eÅit porsiyon x ${portionCalories} kcal)`,
-    `Sadece ${shakeIngredients.length} seÃ§kin kiler malzemesiyle sindirimi kolay ve lezzetli karÄ±ÅÄ±m`,
-    'AÅÄ±rÄ± sÄ±vÄ± hacmi yapmadan kalori yoÄunluÄu yÃ¼ksek doÄal besinlerle dengelendi',
+    `Maliyet odaklı formülasyon: Toplam ${costString} maliyetle gereksiz malzeme kalabalığı olmadan hazırlandı`,
+    `Günlük hedefe tam uyumlu: Toplam ${totalCalories} kcal (2 eşit porsiyon x ${portionCalories} kcal)`,
+    `Sadece ${shakeIngredients.length} seçkin kiler malzemesiyle sindirimi kolay ve lezzetli karışım`,
+    'Aşırı sıvı hacmi yapmadan kalori yoğunluğu yüksek doğal besinlerle dengelendi',
     compatibility.detectedSynergies[0] || 'Lezzet ve makro dengesi optimize edildi',
   ];
 
   const shake: Shake = {
     id: `shake_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     name: baseName,
-    description: `GÃ¼nÃ¼n 2 eÅit porsiyona ayrÄ±lmÄ±Å doÄal shake tarifi (Toplam ${totalCalories} kcal â¢ Porsiyon baÅÄ± ${portionCalories} kcal â¢ Tahmini Maliyet: ${costString}).`,
+    description: `Günün 2 eşit porsiyona ayrılmış doğal shake tarifi (Toplam ${totalCalories} kcal • Porsiyon başı ${portionCalories} kcal • Tahmini Maliyet: ${costString}).`,
     timing,
     ingredients: finalNutrition.ingredients,
     estimatedCalories: totalCalories,
@@ -444,12 +444,12 @@ function buildShakeFromIngredientCombo(
     estimatedCost: finalNutrition.estimatedCost,
     totalVolumeMl: finalNutrition.totalVolumeMl,
     instructions: [
-      'TÃ¼m malzemeleri tek seferde blendere ekleyin.',
-      'YÃ¼ksek devirde 50-60 saniye pÃ¼rÃ¼zsÃ¼z ve kadifemsi kÄ±vama gelene kadar Ã§ekin.',
-      `HazÄ±rladÄ±ÄÄ±nÄ±z karÄ±ÅÄ±mÄ± 2 EÅÄ°T PORSÄ°YONA (${portionCalories} kcal / porsiyon) bÃ¶lÃ¼n (%50 + %50).`,
-      `Toplam ${totalCalories} kcal â¢ 1. Porsiyon: ${portionCalories} kcal â¢ 2. Porsiyon: ${portionCalories} kcal.`,
-      '1. porsiyonu vardiya Ã¶ncesi/Ã¶Älen tÃ¼ketin.',
-      '2. porsiyonu buzdolabÄ±nda muhafaza edip vardiya sonrasÄ± tÃ¼ketin.',
+      'Tüm malzemeleri tek seferde blendere ekleyin.',
+      'Yüksek devirde 50-60 saniye pürüzsüz ve kadifemsi kıvama gelene kadar çekin.',
+      `Hazırladığınız karışımı 2 EŞİT PORSİYONA (${portionCalories} kcal / porsiyon) bölün (%50 + %50).`,
+      `Toplam ${totalCalories} kcal • 1. Porsiyon: ${portionCalories} kcal • 2. Porsiyon: ${portionCalories} kcal.`,
+      '1. porsiyonu vardiya öncesi/öğlen tüketin.',
+      '2. porsiyonu buzdolabında muhafaza edip vardiya sonrası tüketin.',
     ].join('\n'),
     preparationTimeMinutes: 4,
     portionCount: 2,
@@ -528,7 +528,7 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
 
   if (!Number.isFinite(targetKcal) || targetKcal <= 0) {
     throw new Error(
-      'Shake oluÅturmak iÃ§in hesaplanmÄ±Å gÃ¼nlÃ¼k kalori hedefi gereklidir.'
+      'Shake oluşturmak için hesaplanmış günlük kalori hedefi gereklidir.'
     );
   }
   const timing = options.timing || 'morning';
@@ -542,7 +542,7 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
     }
     // FIX: previously threw InsufficientPantryStockError here whenever total pantry
     // calorie capacity fell short of the target (~3200 kcal). Per product decision,
-    // insufficient stock should NEVER block the user with an error â the composer
+    // insufficient stock should NEVER block the user with an error — the composer
     // should silently build the closest possible recipe with what's available. The
     // combo-generation and relaxed-tolerance logic below already handles this
     // gracefully, so we simply let it proceed instead of failing fast here.
@@ -596,7 +596,7 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
   // near-depleted pantry items before they spoil/are forgotten), then cost-efficient items.
   // FIX: previously sorted purely by cost-per-kcal, so a nearly-finished item (e.g. 20g of
   // hazelnuts left) competed only on price and was rarely chosen over a fully-stocked,
-  // cheaper alternative â it just sat in the pantry indefinitely.
+  // cheaper alternative — it just sat in the pantry indefinitely.
   const isMandatory = (id: string) => (options.mandatoryIngredientIds?.includes(id) ? 1 : 0);
   const LOW_STOCK_THRESHOLD_G = 60;
   const isRunningLow = (id: string) => {
@@ -606,7 +606,7 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
   // Learned taste preference: ingredients that show up often in the user's favorited
   // or love/like-rated shakes get a gentle nudge in ingredient selection. This only has
   // data to work with in the browser (favorites/ratings live in localStorage, which the
-  // server-side AI-generation path can't see) â getStoredFavorites/getStoredDailyPlans
+  // server-side AI-generation path can't see) — getStoredFavorites/getStoredDailyPlans
   // already fall back to empty data safely server-side, so affinityScore is just always
   // 0 there and this tier has no effect, no guard needed.
   const affinityScores = (() => {
@@ -729,7 +729,7 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
   }
 
   // If still no candidates within +-300 kcal, try relaxed tolerance (+-500 kcal) so a
-  // realistic plan is still delivered â regardless of total pantry capacity. Previously
+  // realistic plan is still delivered — regardless of total pantry capacity. Previously
   // this threw InsufficientPantryStockError before even attempting the relaxed pass,
   // which produced a hard error exactly when stock was tight. Now we always attempt it.
   if (validCandidates.length === 0) {
@@ -761,20 +761,20 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
   if (validCandidates.length === 0) {
     // FIX: previously distinguished "insufficient calories" (InsufficientPantryStockError)
     // from "no valid combination" as two separate hard failures. Per product decision,
-    // a calorie shortfall alone must never block the user â only a genuine structural
-    // impossibility (no valid 3â6 ingredient combination exists at all, e.g. missing
+    // a calorie shortfall alone must never block the user — only a genuine structural
+    // impossibility (no valid 3–6 ingredient combination exists at all, e.g. missing
     // entire categories like grains/fruits/nuts) reaches this point, since calorie
-    // tolerance was already relaxed to Â±500 kcal above. That case still needs a message,
+    // tolerance was already relaxed to ±500 kcal above. That case still needs a message,
     // since there is truly no recipe to show.
     const capacity = calculatePantryShakeCalorieCapacity(stock);
     throw new Error(
-      `Kilerinizde toplam ${capacity.totalCalories} kcal stok bulunuyor ancak tek bir gÃ¼nlÃ¼k shake iÃ§in gÃ¼venli sindirim ve porsiyon sÄ±nÄ±rlarÄ± dahilinde tarif kombinasyonu oluÅturulamadÄ±. LÃ¼tfen kilerinize yulaf, fÄ±ndÄ±k, ceviz, badem, muz veya tahin gibi shake uyumlu temel besinlerden ekleyin.`
+      `Kilerinizde toplam ${capacity.totalCalories} kcal stok bulunuyor ancak tek bir günlük shake için güvenli sindirim ve porsiyon sınırları dahilinde tarif kombinasyonu oluşturulamadı. Lütfen kilerinize yulaf, fındık, ceviz, badem, muz veya pekmez gibi shake uyumlu temel besinlerden ekleyin.`
     );
   }
 
   // FIX: `excludedShakeNames` (disliked shakes / the shake currently being replaced) was
   // declared on the options interface and threaded all the way from the UI down to here,
-  // but was never actually read anywhere in this function â a disliked recipe could be
+  // but was never actually read anywhere in this function — a disliked recipe could be
   // suggested again immediately. Filter it out now (when enough alternatives remain).
   if (options.excludedShakeNames?.length) {
     const excludedLower = new Set(options.excludedShakeNames.map((n) => n.trim().toLowerCase()));
@@ -785,7 +785,7 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
   }
 
   // FIX: analyzeCompatibility() was already being computed per-shake but its score was
-  // only used for a cosmetic "why chosen" text line â it had zero influence on which
+  // only used for a cosmetic "why chosen" text line — it had zero influence on which
   // combos actually got selected, so genuinely bland/clashing-flavor combos could win
   // purely on cost/ingredient-count. Now: drop clearly incompatible combos outright
   // (when better alternatives exist) and rank the rest by compatibility score first.
@@ -806,8 +806,8 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
     return cached;
   };
 
-  // NEW: "Favorites-based learning" â recipes similar in composition to shakes the user
-  // has previously favorited (â¤ï¸ in the app) get a ranking boost. getStoredFavorites()
+  // NEW: "Favorites-based learning" — recipes similar in composition to shakes the user
+  // has previously favorited (❤️ in the app) get a ranking boost. getStoredFavorites()
   // was already imported here but never actually called, so favorites had zero effect
   // on future suggestions despite being tracked in Settings. Only runs client-side
   // (getStoredFavorites reads localStorage), which matches how it's used elsewhere.
@@ -899,7 +899,7 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
     // Check diversity against already selected candidates.
     // FIX: previously only checked Jaccard similarity (< 0.70), but for a typical 4-5
     // ingredient shake, swapping just ONE ingredient already drops similarity below 0.70
-    // (e.g. 4/6 â 0.67), so two shakes differing by a single item were accepted as
+    // (e.g. 4/6 ≈ 0.67), so two shakes differing by a single item were accepted as
     // "distinct". Now also require at least 2 ingredients to actually differ.
     const isTooSimilar = selectedShakes.some((existing) => {
       const sim = calculateRecipeSimilarity(candidate.ingredients, existing.ingredients);
@@ -930,9 +930,9 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
   return selectedShakes.map((shake, idx) => {
     const costLabel = shake.estimatedCost && shake.estimatedCost > 0 ? `~${shake.estimatedCost} TL` : 'Ekonomik';
     let optionTag = '';
-    if (idx === 0) optionTag = ` (En Uygun Maliyet â¢ ${costLabel})`;
-    else if (idx === 1) optionTag = ` (SeÃ§enek 2 â¢ ${costLabel})`;
-    else optionTag = ` (SeÃ§enek 3 â¢ ${costLabel})`;
+    if (idx === 0) optionTag = ` (En Uygun Maliyet • ${costLabel})`;
+    else if (idx === 1) optionTag = ` (Seçenek 2 • ${costLabel})`;
+    else optionTag = ` (Seçenek 3 • ${costLabel})`;
 
     return {
       ...shake,

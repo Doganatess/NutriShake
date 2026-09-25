@@ -1,68 +1,80 @@
 import { DailyPlan, Shake, UserProfile, MealAnalysis, DailyShake } from '../types';
-import { composeThreeDistinctDailyShakes, composeDeterministicShake } from './recipeCompositionEngine';
+import { composeThreeDistinctDailyShakes } from './recipeCompositionEngine';
 import { getStoredProfile, saveDailyPlan } from '../storage/storageAbstraction';
+import { buildDailyState } from './dailyPlanEngine';
 
 export interface PlanOptions {
   date?: string;
   forceRegenerate?: boolean;
+  meals?: MealAnalysis[];
 }
 
 /**
- * Calculates the daily shake target from the user's calculated daily energy target.
- *
- * The daily calorie target belongs to the whole-day nutrition model. The shake
- * is intentionally kept slightly below that target so it is not forced to equal
- * the entire day's calories. Main meals and other real consumption remain
- * separately tracked by the daily nutrition system.
- *
- * Rule: keep the generated daily shake 200–300 kcal below the daily target.
- * A 250 kcal gap is used as the deterministic midpoint.
+ * Shake planning is driven by the day's remaining need, not by a fixed shake
+ * calorie constant. If meals are added, the remaining need changes and a newly
+ * generated plan uses the new remaining amount.
  */
-export function calculateOptimalDailyShakeKcal(userProfile?: UserProfile | null): number {
-  const dailyTarget = Math.round(
-    Number(userProfile?.calorieGoal || userProfile?.maintenanceCalories || 0)
-  );
-
-  if (!Number.isFinite(dailyTarget) || dailyTarget <= 0) return 0;
-
-  const gapKcal = 250;
-  const target = dailyTarget - gapKcal;
-
-  // Never turn a valid daily target into a zero/negative shake target.
-  // No legacy 2500/3200 kcal floor is applied here.
-  return Math.max(300, Math.round(target));
+export function calculateOptimalDailyShakeKcal(
+  userProfile?: UserProfile | null,
+  remainingCalories?: number
+): number {
+  const profile = userProfile || getStoredProfile();
+  if (!profile) return 0;
+  const target = Number.isFinite(remainingCalories)
+    ? Number(remainingCalories)
+    : Math.max(0, Number(profile.calorieGoal) || 0);
+  return Math.max(0, Math.round(target));
 }
 
-/**
- * Deterministic Planning Engine (1 Active Shake / Day -> 2 Equal Portions, with at least 3 candidates).
- *
- * Requirements:
- * 1. Produces at least 3 distinct candidates satisfying all 12 rules.
- * 2. Selected master recipe is divided into 2 equal portions: 1. Öğün (50%) and 2. Öğün (50%).
- * 3. Ties candidateShakes and selectedShakeId to the plan.
- * 4. Main meal calories are tracked separately; they do not mutate the selected shake recipe.
- * 5. The shake target is derived from the user's daily calorie target, not a fixed 3200 kcal constant.
- */
 export function generateDailyPlan(
   targetDate: string,
   profile?: UserProfile | null,
   options: PlanOptions = {}
 ): DailyPlan {
   const userProfile = profile !== undefined ? profile : getStoredProfile();
-  
-  // Shake target is derived from the calculated daily target and kept ~250 kcal below it.
-  const targetShakesKcal = calculateOptimalDailyShakeKcal(userProfile);
+  if (!userProfile) throw new Error('Kullanıcı profili bulunamadı.');
 
-  // Compose at least 3 distinct candidates
+  const meals = (options.meals || []).filter((meal) => meal.date === targetDate);
+  const currentPlan = null;
+  const state = buildDailyState(userProfile, currentPlan, meals);
+  const targetShakesKcal = calculateOptimalDailyShakeKcal(userProfile, state.remainingCalories);
+
+  if (targetShakesKcal <= 0) {
+    const emptyPlan: DailyPlan = {
+      id: `plan_${targetDate}_${Date.now()}`,
+      date: targetDate,
+      title: 'Günün Planı',
+      notes: 'Günlük enerji hedefi tüketimle karşılandı; yeni shake ihtiyacı yok.',
+      estimatedDailyNeed: state.estimatedDailyNeed,
+      goalAdjustmentKcal: state.goalAdjustmentKcal,
+      targetCalories: state.dailyTarget,
+      consumedCalories: state.consumedCalories,
+      remainingCalories: state.remainingCalories,
+      targetRemainingCalories: 0,
+      macroTargets: state.macroTargets,
+      shakes: [],
+      candidateShakes: [],
+      completedCalories: 0,
+      totalCalories: 0,
+      isFullyCompleted: true,
+      schemaVersion: 3,
+    };
+    saveDailyPlan(emptyPlan);
+    return emptyPlan;
+  }
+
   const candidates = composeThreeDistinctDailyShakes({
     targetCalories: targetShakesKcal,
     timing: 'morning',
     userProfile,
   });
 
+  if (!candidates.length) {
+    throw new Error('Kalan ihtiyaca uygun stoklardan hazırlanabilir shake bulunamadı.');
+  }
+
   const selectedShake = candidates[0];
   const portionKcal = selectedShake.portionCalories || Math.round(selectedShake.estimatedCalories / 2);
-
   const dailyShake: DailyShake = {
     id: selectedShake.id,
     name: selectedShake.name,
@@ -74,20 +86,17 @@ export function generateDailyPlan(
       fat: selectedShake.fat,
       fiber: selectedShake.fiber,
     },
+    portionNutrition: {
+      calories: portionKcal,
+      protein: selectedShake.protein / 2,
+      carbs: selectedShake.carbs / 2,
+      fat: selectedShake.fat / 2,
+      fiber: selectedShake.fiber / 2,
+    },
     portionCount: 2,
     portions: [
-      {
-        portionNumber: 1,
-        name: '1. Öğün',
-        calories: portionKcal,
-        isCompleted: selectedShake.portion1Completed || false,
-      },
-      {
-        portionNumber: 2,
-        name: '2. Öğün',
-        calories: portionKcal,
-        isCompleted: selectedShake.portion2Completed || false,
-      },
+      { portionNumber: 1, name: '1. Öğün', calories: portionKcal, isCompleted: false },
+      { portionNumber: 2, name: '2. Öğün', calories: portionKcal, isCompleted: false },
     ],
     instructions: selectedShake.instructions,
     preparationTimeMinutes: selectedShake.preparationTimeMinutes,
@@ -97,57 +106,49 @@ export function generateDailyPlan(
   const plan: DailyPlan = {
     id: `plan_${targetDate}_${Date.now()}`,
     date: targetDate,
-    title: 'Günün Doğal Shake Planı',
-    notes: `${candidates.length} farklı geçerli alternatif tarif hazırlandı (her biri 2 eşit porsiyon).`,
+    title: 'Günün Shake Planı',
+    notes: `${candidates.length} farklı geçerli alternatif tarif hazırlandı.`,
+    estimatedDailyNeed: state.estimatedDailyNeed,
+    goalAdjustmentKcal: state.goalAdjustmentKcal,
+    targetCalories: state.dailyTarget,
+    consumedCalories: state.consumedCalories,
+    remainingCalories: state.remainingCalories,
+    targetRemainingCalories: targetShakesKcal,
+    macroTargets: state.macroTargets,
     shakes: candidates,
     dailyShake,
     candidateShakes: candidates,
-    // FIX: previously auto-selected the first candidate here, so the user never
-    // actually got to choose between the 3 generated alternatives — TodayView just
-    // silently tracked shakes[0]. Leaving this unset means TodayView shows a picker
-    // when there's more than one candidate, and the user's choice is what gets saved.
     selectedShakeId: candidates.length === 1 ? selectedShake.id : undefined,
     totalCalories: selectedShake.estimatedCalories,
     completedCalories: 0,
     isFullyCompleted: false,
-    schemaVersion: 2,
+    schemaVersion: 3,
   };
 
   saveDailyPlan(plan);
   return plan;
 }
 
-/**
- * Re-evaluates completion states of the daily plan when a meal is logged.
- * Meal calories do not mutate the already-generated shake recipe.
- * The daily nutrition engine separately tracks meals + completed shake portions.
- */
+/** Recalculates the day's state without mutating the recipe itself. */
 export function rebalancePlanWithMeals(
   plan: DailyPlan,
   meals: MealAnalysis[],
   profile?: UserProfile | null
 ): DailyPlan {
-  // Shakes are NOT reduced or changed when meals are consumed.
-  // We simply recalculate completedCalories from portions drunk.
-  let completedCalories = 0;
-  let isFullyCompleted = false;
-
-  if (plan.dailyShake) {
-    const p1 = plan.dailyShake.portions[0]?.isCompleted ? plan.dailyShake.portions[0].calories : 0;
-    const p2 = plan.dailyShake.portions[1]?.isCompleted ? plan.dailyShake.portions[1].calories : 0;
-    completedCalories = p1 + p2;
-    isFullyCompleted = plan.dailyShake.portions[0]?.isCompleted && plan.dailyShake.portions[1]?.isCompleted;
-  } else if (plan.shakes && plan.shakes.length > 0) {
-    completedCalories = plan.shakes.reduce((sum, s) => sum + (s.isCompleted ? s.estimatedCalories : 0), 0);
-    isFullyCompleted = plan.shakes.every((s) => s.isCompleted);
-  }
-
+  const userProfile = profile || getStoredProfile();
+  if (!userProfile) return plan;
+  const state = buildDailyState(userProfile, plan, meals);
   const updatedPlan: DailyPlan = {
     ...plan,
-    completedCalories,
-    isFullyCompleted,
+    estimatedDailyNeed: state.estimatedDailyNeed,
+    goalAdjustmentKcal: state.goalAdjustmentKcal,
+    targetCalories: state.dailyTarget,
+    consumedCalories: state.consumedCalories,
+    remainingCalories: state.remainingCalories,
+    targetRemainingCalories: state.remainingCalories,
+    macroTargets: state.macroTargets,
+    updatedAt: new Date().toISOString(),
   };
-
   saveDailyPlan(updatedPlan);
   return updatedPlan;
 }

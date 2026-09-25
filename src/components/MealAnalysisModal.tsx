@@ -37,11 +37,13 @@ export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
   // analysis. The backend (analyzeMealMultiVision) already accepted a `photos` array;
   // this UI previously only ever sent a single image.
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
+  const [entryMode, setEntryMode] = useState<'photo' | 'quick'>('photo');
+  const [quickCalories, setQuickCalories] = useState<string>('');
 
   const [mealType, setMealType] = useState<MealAnalysis['mealType']>('lunch');
   const [mealName, setMealName] = useState<string>('Öğle Yemeği');
   const [userNotes, setUserNotes] = useState<string>('');
-  const [savePhotoInStorage, setSavePhotoInStorage] = useState<boolean>(true);
+  const [savePhotoInStorage, setSavePhotoInStorage] = useState<boolean>(false);
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +81,38 @@ export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
 
   const handleRemovePhoto = (index: number) => {
     setPhotos((prev) => prev.filter((_, i) => i !== index));
+  };
+
+
+  const handleQuickEntrySave = () => {
+    const calories = Math.max(0, Number(quickCalories));
+    if (!Number.isFinite(calories) || calories <= 0) {
+      setError('Lütfen geçerli bir kalori değeri girin.');
+      return;
+    }
+
+    const newMeal: MealAnalysis = {
+      id: `meal_${Date.now()}`,
+      date: getTodayDateString(),
+      mealType,
+      mealName: mealName || 'Hızlı Öğün Kaydı',
+      hasPhoto: false,
+      estimatedCalories: Math.round(calories),
+      calorieMin: Math.round(calories),
+      calorieMax: Math.round(calories),
+      protein: null,
+      carbs: null,
+      fat: null,
+      confidence: 'high',
+      detectedItems: [],
+      analysisSummary: 'Kullanıcı tarafından hızlı kalori girişi yapıldı. Makrolar bilinmiyor.',
+      source: 'quick_entry',
+      status: 'confirmed',
+      createdAt: new Date().toISOString(),
+    };
+    saveMeal(newMeal);
+    onMealSaved(newMeal);
+    onClose();
   };
 
   const handleStartAnalysis = async () => {
@@ -148,6 +182,8 @@ export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
       detectedItems,
       cookingStyleNotes,
       analysisSummary,
+      source: 'photo_ai',
+      status: 'confirmed',
       createdAt: new Date().toISOString(),
     };
 
@@ -197,6 +233,23 @@ export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
           )}
 
           {!analyzed ? (
+            /* Entry Screen */
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => setEntryMode('photo')} className={`py-2 rounded-xl border text-xs font-bold ${entryMode === 'photo' ? 'border-emerald-600 bg-emerald-50 text-emerald-900' : 'border-stone-200 text-stone-600'}`}>Fotoğrafla Analiz</button>
+                <button type="button" onClick={() => setEntryMode('quick')} className={`py-2 rounded-xl border text-xs font-bold ${entryMode === 'quick' ? 'border-emerald-600 bg-emerald-50 text-emerald-900' : 'border-stone-200 text-stone-600'}`}>Hızlı Kayıt</button>
+              </div>
+
+              {entryMode === 'quick' ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-stone-700 mb-1.5">Tüketilen kalori</label>
+                    <input type="number" min="0" inputMode="numeric" value={quickCalories} onChange={(e) => setQuickCalories(e.target.value)} placeholder="Örn: 600" className="w-full px-3 py-3 text-sm border border-stone-200 rounded-xl" />
+                  </div>
+                  <p className="text-[11px] text-stone-500">Makrolar bilinmiyorsa sistem bunları tahmin etmez.</p>
+                  <button type="button" onClick={handleQuickEntrySave} className="w-full py-3 rounded-xl bg-emerald-600 text-white text-sm font-bold">Öğünü Kaydet</button>
+                </div>
+              ) : (
             /* Upload Screen */
             <div className="space-y-4">
               {/* Photo Area: up to MAX_PHOTOS thumbnails + an "add more" tile */}
@@ -362,6 +415,8 @@ export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
                 </p>
               </div>
             </div>
+              )}
+            </div>
           ) : (
             /* Results Screen (Editable) */
             <div className="space-y-4">
@@ -523,6 +578,7 @@ export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
         {/* Modal Footer Actions */}
         <div className="pt-3 border-t border-stone-100 shrink-0">
           {!analyzed ? (
+            entryMode === 'photo' ? (
             <button
               disabled={photos.length === 0 || isLoading}
               onClick={handleStartAnalysis}
@@ -540,6 +596,7 @@ export const MealAnalysisModal: React.FC<MealAnalysisModalProps> = ({
                 </>
               )}
             </button>
+            ) : null
           ) : (
             <div className="flex gap-2">
               <button

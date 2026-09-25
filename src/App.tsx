@@ -28,8 +28,8 @@ import {
 } from './store/storage';
 import { calculateDailyNutrition } from './utils/nutritionEngine';
 import { generateDailyPlanApi } from './services/apiClient';
-import { generateDailyPlan, calculateOptimalDailyShakeKcal } from './engines/planningEngine';
-import { getStoredStock, getStoredDailyPlans } from './storage/storageAbstraction';
+import { generateDailyPlan } from './engines/planningEngine';
+import { getStoredStock, getStoredDailyPlans, getDailyActivity } from './storage/storageAbstraction';
 import { getIngredientAffinityScores } from './engines/statisticsEngine';
 import { hasDairyInStock } from './engines/recipeCompositionEngine';
 
@@ -85,7 +85,7 @@ export default function App() {
 
   // Daily Nutrition Summary (Deterministic calculation)
   const nutritionSummary = useMemo(() => {
-    return calculateDailyNutrition(profile, dailyPlan, todayMeals);
+    return calculateDailyNutrition(profile, dailyPlan, todayMeals, getDailyActivity(todayStr));
   }, [profile, dailyPlan, todayMeals]);
 
   // Refresh data callback from storage
@@ -174,19 +174,22 @@ export default function App() {
           ? [`Kullanıcı geçmişte şu malzemeleri içeren shake'leri belirgin şekilde daha çok beğendi: ${topAffinityIngredients.join(', ')}. Mümkün olduğunda bunlardan birini tarife dahil et.`]
           : [];
 
-      // Optimal daily shake calories calculated by Planning Engine (~800 - 1400 kcal)
-      // Main meal calories are independent and NOT subtracted from the shake target
-      const optimalShakeKcal = calculateOptimalDailyShakeKcal(profile);
+      // Shake planning follows the current day's remaining need. Breakfast is a
+      // gate for shake generation only; the rest of the app remains usable without it.
+      const hasBreakfast = todayMeals.some((meal) => meal.mealType === 'breakfast' && (meal.status || 'confirmed') === 'confirmed');
+      if (!hasBreakfast) {
+        setGlobalError('Shake oluşturmak için önce kahvaltını ekleyip onaylamalısın.');
+        return;
+      }
 
       const plan = await generateDailyPlanApi({
         date: todayStr,
-        // FIX: Previously this sent the user's general diet calorie goal (profile.calorieGoal),
-        // which silently overrode the fixed ~3200 kcal shake target computed by
-        // calculateOptimalDailyShakeKcal(). The server reads exactly this field
-        // (dailyGoalKcal) as the shake calorie target, so it must be optimalShakeKcal.
-        dailyGoalKcal: optimalShakeKcal,
-        consumedMealsKcal: nutritionSummary.analyzedMealCalories,
-        remainingKcalNeeded: optimalShakeKcal,
+        dailyGoalKcal: nutritionSummary.calorieGoal,
+        consumedMealsKcal: nutritionSummary.consumedCalories,
+        remainingKcalNeeded: nutritionSummary.remainingCalories,
+        remainingProtein: nutritionSummary.targetProtein !== undefined ? Math.max(0, nutritionSummary.targetProtein - nutritionSummary.consumedProtein) : undefined,
+        remainingCarbs: nutritionSummary.targetCarbs !== undefined ? Math.max(0, nutritionSummary.targetCarbs - nutritionSummary.consumedCarbs) : undefined,
+        remainingFat: nutritionSummary.targetFat !== undefined ? Math.max(0, nutritionSummary.targetFat - nutritionSummary.consumedFat) : undefined,
         shakeCount: 1, // 1 daily recipe -> 2 equal portions
         portionPreference: profile.portionPreference,
         mandatoryIngredientIds: mandatoryIds,
@@ -214,7 +217,7 @@ export default function App() {
       console.warn('AI Plan generation unavailable or offline, generating deterministic plan:', err);
       // Deterministic planning engine fallback
       try {
-        const fallbackPlan = generateDailyPlan(todayStr, profile);
+        const fallbackPlan = generateDailyPlan(todayStr, profile, { meals: todayMeals });
         setDailyPlan(fallbackPlan);
         setActiveTab('plan');
       } catch (fallbackErr) {

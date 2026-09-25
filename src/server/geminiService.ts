@@ -9,7 +9,7 @@ import {
 import { PortionPreference, Shake, DailyPlan } from '../types.js';
 import { composeThreeDistinctDailyShakes, composeDeterministicShake } from '../engines/recipeCompositionEngine.js';
 import { getAvailableStockGrams, calculatePantryShakeCalorieCapacity } from '../engines/stockEngine.js';
-import { DAILY_TARGET_KCAL, CALORIE_TOLERANCE_KCAL } from '../constants/calorieTargets.js';
+import { CALORIE_TOLERANCE_KCAL } from '../constants/calorieTargets.js';
 
 let aiClient: GoogleGenAI | null = null;
 
@@ -198,7 +198,10 @@ const DETERMINISTIC_RECIPE_TEMPLATES: TemplateDef[] = [
  * Enforces 1 Shake / Day -> 2 Equal Portions (1. Öğün & 2. Öğün), with minimum 3 distinct valid shakes.
  */
 export function generateDeterministicDailyPlan(req: GeneratePlanRequest): DailyPlan {
-  const targetTotalKcal = Math.max(DAILY_TARGET_KCAL, req.dailyGoalKcal || 0);
+  const targetTotalKcal = Math.max(0, req.remainingKcalNeeded || 0);
+  if (targetTotalKcal <= 0) {
+    throw new Error('Günün kalan enerji ihtiyacı yok.');
+  }
   const candidates = composeThreeDistinctDailyShakes({
     targetCalories: targetTotalKcal,
     timing: 'morning',
@@ -268,7 +271,7 @@ export function generateDeterministicDailyPlan(req: GeneratePlanRequest): DailyP
  */
 export function generateDeterministicAlternativeShake(req: ReplaceShakeRequest): Shake {
   return composeDeterministicShake({
-    targetCalories: Math.max(DAILY_TARGET_KCAL, req.targetKcal || 0),
+    targetCalories: Math.max(0, req.targetKcal || 0),
     userStock: req.userStock,
     stockOnly: !!req.userStock,
     excludedShakeNames: [
@@ -402,6 +405,9 @@ export interface GeneratePlanRequest {
   dislikedShakeNames?: string[];
   favoriteShakeNames?: string[];
   userStock?: Record<string, any>;
+  remainingProtein?: number;
+  remainingCarbs?: number;
+  remainingFat?: number;
 }
 
 export async function generateDailyShakePlan(req: GeneratePlanRequest): Promise<DailyPlan> {
@@ -423,10 +429,11 @@ export async function generateDailyShakePlan(req: GeneratePlanRequest): Promise<
     })
     .join('\n');
 
-  const targetTotalKcal = Math.max(DAILY_TARGET_KCAL, req.dailyGoalKcal || 0);
+  const targetTotalKcal = Math.max(0, req.remainingKcalNeeded || 0);
   const minAcceptableKcal = targetTotalKcal - CALORIE_TOLERANCE_KCAL;
   const maxAcceptableKcal = targetTotalKcal + CALORIE_TOLERANCE_KCAL;
   const targetPortionKcal = Math.round(targetTotalKcal / 2);
+  const remainingMacroContext = `Kalan makrolar — protein: ${req.remainingProtein ?? 'bilinmiyor'} g, karbonhidrat: ${req.remainingCarbs ?? 'bilinmiyor'} g, yağ: ${req.remainingFat ?? 'bilinmiyor'} g.`;
 
   const pantryCapacity = req.userStock ? calculatePantryShakeCalorieCapacity(req.userStock) : null;
   const pantryInfo = pantryCapacity
@@ -438,8 +445,11 @@ Kullanıcı için BUGÜNLÜK 2 eşit porsiyona ayrılacak yüksek kalorili doğa
 
 ${pantryInfo}
 
+${remainingMacroContext}
+
 KESİN KALORİ KURALI (HAYATİ ÖNEMDE):
-- Kullanıcının Günlük Hedefi: ${targetTotalKcal} kcal.
+- Kullanıcının kalan enerji ihtiyacı: ${targetTotalKcal} kcal.
+- Günlük hedef ayrı bir veridir; shake yalnızca kalan ihtiyacın planlanmasıdır.
 - Shake TOPLAM kalorisi hedef ile en fazla 300 kcal fark edebilir.
 - Kabul edilen aralık: ${minAcceptableKcal} - ${maxAcceptableKcal} kcal.
 - ${minAcceptableKcal} kcal altı veya ${maxAcceptableKcal} kcal üstü KESİNLİKLE GEÇERSİZDİR.
@@ -771,6 +781,9 @@ export interface ReplaceShakeRequest {
   userPreferences: string[];
   dislikedShakeNames?: string[];
   userStock?: Record<string, any>;
+  remainingProtein?: number;
+  remainingCarbs?: number;
+  remainingFat?: number;
 }
 
 export async function replaceSingleShake(req: ReplaceShakeRequest): Promise<Shake> {
@@ -792,10 +805,8 @@ export async function replaceSingleShake(req: ReplaceShakeRequest): Promise<Shak
     )
     .join('\n');
 
-  // FIX: previously defaulted to 500 kcal and used a 250 kcal tolerance independent of
-  // the app's daily target constants. Now floored at DAILY_TARGET_KCAL and uses the
-  // shared CALORIE_TOLERANCE_KCAL so this matches generateDailyShakePlan's behavior.
-  const targetKcal = Math.round(Math.max(DAILY_TARGET_KCAL, req.targetKcal || 0));
+  // Replacement validation uses the current remaining target.
+  const targetKcal = Math.round(Math.max(0, req.targetKcal || 0));
   const targetPortionKcal = Math.round(targetKcal / 2);
   const minAcceptableKcal = targetKcal - CALORIE_TOLERANCE_KCAL;
   const maxAcceptableKcal = targetKcal + CALORIE_TOLERANCE_KCAL;

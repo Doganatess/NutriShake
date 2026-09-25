@@ -12,6 +12,8 @@ import {
   StockTransaction,
   ShiftSchedule,
   ShiftType,
+  DailyActivity,
+  Entitlement,
 } from '../types.js';
 
 export const CURRENT_SCHEMA_VERSION = 3;
@@ -89,6 +91,10 @@ export const STORAGE_KEYS = {
   CUSTOM_RECIPES: 'nutrishake_custom_recipes',
   SHOPPING_CHECKED: 'nutrishake_shopping_checked',
   SHIFTS: 'nutrishake_shifts',
+  DAILY_ACTIVITIES: 'nutrishake_daily_activities',
+  ENTITLEMENT: 'nutrishake_entitlement',
+  REWARD_CREDITS: 'nutrishake_reward_credits',
+  PENDING_MUTATIONS: 'nutrishake_pending_mutations',
 };
 
 // Returns current date string as YYYY-MM-DD in local time
@@ -586,6 +592,70 @@ export function updateShakeRating(date: string, shakeId: string, rating: ShakeRa
   }
 }
 
+
+
+export function getStoredDailyActivities(): Record<string, DailyActivity> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.DAILY_ACTIVITIES);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveDailyActivity(activity: DailyActivity): void {
+  const activities = getStoredDailyActivities();
+  activities[activity.date] = activity;
+  localStorage.setItem(STORAGE_KEYS.DAILY_ACTIVITIES, JSON.stringify(activities));
+}
+
+export function getDailyActivity(date: string): DailyActivity | null {
+  return getStoredDailyActivities()[date] || null;
+}
+
+export function getStoredEntitlement(): Entitlement | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.ENTITLEMENT);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveStoredEntitlement(entitlement: Entitlement): void {
+  localStorage.setItem(STORAGE_KEYS.ENTITLEMENT, JSON.stringify(entitlement));
+}
+
+export interface PendingMutation {
+  id: string;
+  type: 'meal_created' | 'stock_updated' | 'weight_logged' | 'plan_updated';
+  payload: unknown;
+  createdAt: string;
+}
+
+export function getPendingMutations(): PendingMutation[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.PENDING_MUTATIONS);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function queuePendingMutation(mutation: PendingMutation): void {
+  const next = getPendingMutations().filter((m) => m.id !== mutation.id);
+  next.push(mutation);
+  localStorage.setItem(STORAGE_KEYS.PENDING_MUTATIONS, JSON.stringify(next));
+}
+
+export function acknowledgePendingMutation(id: string): void {
+  const next = getPendingMutations().filter((m) => m.id !== id);
+  localStorage.setItem(STORAGE_KEYS.PENDING_MUTATIONS, JSON.stringify(next));
+}
+
 // Shift Schedule Management
 export const DEFAULT_SHIFTS: ShiftSchedule[] = [
   { id: 'shift_1', dayOfWeek: 1, shiftType: 'morning', label: 'Sabah (08:00 - 17:00)', startTime: '08:00', endTime: '17:00', mealWindowStart: '15:00', mealWindowEnd: '16:30' },
@@ -640,6 +710,9 @@ export function exportAllUserData(): string {
       dislikedShakes: getStoredDislikedShakes(),
       userMemories: getStoredUserMemories(),
       shifts: getStoredShifts(),
+      dailyActivities: getStoredDailyActivities(),
+      entitlement: getStoredEntitlement(),
+      pendingMutations: getPendingMutations(),
     },
   };
 
@@ -674,6 +747,9 @@ export function importUserData(jsonString: string): { success: boolean; message:
     if (data.dislikedShakes) localStorage.setItem(STORAGE_KEYS.DISLIKED_SHAKES, JSON.stringify(data.dislikedShakes));
     if (data.userMemories) localStorage.setItem(STORAGE_KEYS.USER_MEMORIES, JSON.stringify(data.userMemories));
     if (data.shifts && Array.isArray(data.shifts)) saveStoredShifts(data.shifts);
+    if (data.dailyActivities && typeof data.dailyActivities === 'object') localStorage.setItem(STORAGE_KEYS.DAILY_ACTIVITIES, JSON.stringify(data.dailyActivities));
+    if (data.entitlement) saveStoredEntitlement(data.entitlement);
+    if (data.pendingMutations && Array.isArray(data.pendingMutations)) localStorage.setItem(STORAGE_KEYS.PENDING_MUTATIONS, JSON.stringify(data.pendingMutations));
 
     return { success: true, message: 'Verileriniz başarıyla içe aktarıldı.' };
   } catch (err) {

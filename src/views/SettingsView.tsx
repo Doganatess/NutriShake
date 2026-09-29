@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Settings,
   User,
@@ -17,8 +17,6 @@ import {
 } from 'lucide-react';
 import {
   UserProfile,
-  ActivityLevel,
-  PortionPreference,
   UserPreference,
   Shake,
 } from '../types';
@@ -54,17 +52,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onResetAppToOnboarding,
 }) => {
   // Profile edit states
-  const [currentWeight, setCurrentWeight] = useState<number>(profile.currentWeight);
-  const [targetWeight, setTargetWeight] = useState<number>(profile.targetWeight);
-  const [height, setHeight] = useState<number>(profile.height);
-  const [activityLevel, setActivityLevel] = useState<ActivityLevel>(profile.activityLevel);
+  const [currentWeightText, setCurrentWeightText] = useState(String(profile.currentWeight));
+  const [targetWeightText, setTargetWeightText] = useState(String(profile.targetWeight));
+  const [heightText, setHeightText] = useState(String(profile.height));
   const [dailyShakeCount, setDailyShakeCount] = useState<number>(profile.dailyShakeCount);
-  const [portionPreference, setPortionPreference] = useState<PortionPreference>(profile.portionPreference);
-  const [calorieGoal, setCalorieGoal] = useState<number>(profile.calorieGoal);
-  const [proteinGoal, setProteinGoal] = useState<number>(profile.proteinGoal);
-  const [targetPace, setTargetPace] = useState<number>(profile.goalSettings?.targetPace ?? profile.monthlyWeightGoalKg ?? 0.25);
+  const [calorieGoalText, setCalorieGoalText] = useState(String(profile.calorieGoal));
+  const [proteinGoalText, setProteinGoalText] = useState(String(profile.proteinGoal));
+  const [targetPaceText, setTargetPaceText] = useState(String(profile.goalSettings?.targetPace ?? profile.monthlyWeightGoalKg ?? 0.25));
   const [targetPaceUnit, setTargetPaceUnit] = useState<'kg_per_week' | 'kg_per_month'>(profile.goalSettings?.targetPaceUnit ?? 'kg_per_week');
   const [savedFeedback, setSavedFeedback] = useState<boolean>(false);
+
+  const currentWeight = Number(currentWeightText) || 0;
+  const targetWeight = Number(targetWeightText) || 0;
+  const height = Number(heightText) || 0;
+  const targetPace = Number(targetPaceText) || 0;
+  const calorieGoal = Number(calorieGoalText) || 0;
+  const proteinGoal = Number(proteinGoalText) || 0;
 
   // AI Memory / Preferences
   const [preferences, setPreferences] = useState<UserPreference[]>(getStoredPreferences());
@@ -80,6 +83,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // Handle Profile Save
   const handleSaveProfile = () => {
+    if (currentWeight <= 0 || targetWeight <= 0 || height <= 0 || calorieGoal <= 0 || proteinGoal <= 0) return;
     const pacePerWeek = targetPaceUnit === 'kg_per_week' ? targetPace : targetPace / 4.345;
     const dailyAdjustmentKcal = Math.round((pacePerWeek * 7700) / 7);
     const goalSettings = {
@@ -94,9 +98,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       currentWeight,
       targetWeight,
       height,
-      activityLevel,
       dailyShakeCount,
-      portionPreference,
       calorieGoal,
       proteinGoal,
       goalSettings,
@@ -128,9 +130,30 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       targetPaceUnit === 'kg_per_week' ? targetPace * 4.345 : targetPace,
       profile.gender,
     );
-    setCalorieGoal(rec.recommendedGoal);
-    setProteinGoal(rec.proteinGoal);
+    setCalorieGoalText(String(rec.recommendedGoal));
+    setProteinGoalText(String(rec.proteinGoal));
   };
+
+  useEffect(() => {
+    if (currentWeight <= 0 || targetWeight <= 0 || height <= 0) return;
+    const rec = estimateCalorieNeeds(
+      currentWeight, height, targetWeight,
+      {
+        workMovement: profile.workMovement,
+        sportType: profile.sportType,
+        sportDaysPerWeek: profile.sportDaysPerWeek,
+        sportMinutesPerSession: profile.sportMinutesPerSession,
+        sportIntensity: profile.sportIntensity,
+        generalMovement: profile.generalMovement,
+        status: 'normal',
+      },
+      profile.age,
+      targetPaceUnit === 'kg_per_week' ? targetPace * 4.345 : targetPace,
+      profile.gender,
+    );
+    setCalorieGoalText(String(rec.recommendedGoal));
+    setProteinGoalText(String(rec.proteinGoal));
+  }, [currentWeight, targetWeight, height, targetPace, targetPaceUnit, profile.workMovement, profile.sportType, profile.sportDaysPerWeek, profile.sportMinutesPerSession, profile.sportIntensity, profile.generalMovement, profile.age, profile.gender]);
 
   // Add preference rule
   const handleAddPreferenceRule = () => {
@@ -240,9 +263,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <input
               type="number"
               step="0.1"
-              value={currentWeight}
-              onChange={(e) => setCurrentWeight(parseFloat(e.target.value) || 60)}
-              className="w-full px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 font-bold"
+              value={currentWeightText}
+              onChange={(e) => setCurrentWeightText(e.target.value)}
+              className="w-full px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 font-bold text-stone-500 focus:text-stone-900 outline-none"
             />
           </div>
           <div>
@@ -250,36 +273,36 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <input
               type="number"
               step="0.1"
-              value={targetWeight}
-              onChange={(e) => setTargetWeight(parseFloat(e.target.value) || 60)}
-              className="w-full px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 font-bold"
+              value={targetWeightText}
+              onChange={(e) => setTargetWeightText(e.target.value)}
+              className="w-full px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 font-bold text-stone-500 focus:text-stone-900 outline-none"
             />
           </div>
           <div>
             <label className="block text-stone-600 font-medium mb-1">Boy (cm)</label>
             <input
               type="number"
-              value={height}
-              onChange={(e) => setHeight(parseInt(e.target.value) || 170)}
-              className="w-full px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 font-bold"
+              value={heightText}
+              onChange={(e) => setHeightText(e.target.value)}
+              className="w-full px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 font-bold text-stone-500 focus:text-stone-900 outline-none"
             />
           </div>
           <div>
             <label className="block text-stone-600 font-medium mb-1">Günlük Kalori Hedefi</label>
             <input
               type="number"
-              value={calorieGoal}
-              onChange={(e) => setCalorieGoal(parseInt(e.target.value) || 2000)}
-              className="w-full px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 font-bold"
+              value={calorieGoalText}
+              onChange={(e) => setCalorieGoalText(e.target.value)}
+              className="w-full px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 font-bold text-stone-500 focus:text-stone-900 outline-none"
             />
           </div>
           <div>
             <label className="block text-stone-600 font-medium mb-1">Günlük Protein Hedefi (g)</label>
             <input
               type="number"
-              value={proteinGoal}
-              onChange={(e) => setProteinGoal(parseInt(e.target.value) || 100)}
-              className="w-full px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 font-bold"
+              value={proteinGoalText}
+              onChange={(e) => setProteinGoalText(e.target.value)}
+              className="w-full px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 font-bold text-stone-500 focus:text-stone-900 outline-none"
             />
           </div>
           <div>
@@ -289,8 +312,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 type="number"
                 step="0.05"
                 min="0"
-                value={targetPace}
-                onChange={(e) => setTargetPace(parseFloat(e.target.value) || 0)}
+                value={targetPaceText}
+                onChange={(e) => setTargetPaceText(e.target.value)}
                 className="flex-1 px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 font-bold text-emerald-800"
               />
               <select value={targetPaceUnit} onChange={(e) => setTargetPaceUnit(e.target.value as 'kg_per_week' | 'kg_per_month')} className="px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 text-xs font-bold">
@@ -320,34 +343,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs pt-1">
-          <div>
-            <label className="block text-stone-600 font-medium mb-1">Aktivite Seviyesi</label>
-            <select
-              value={activityLevel}
-              onChange={(e) => setActivityLevel(e.target.value as ActivityLevel)}
-              className="w-full px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 font-semibold"
-            >
-              <option value="sedentary">Hareketsiz (Masa başı)</option>
-              <option value="light">Hafif Aktif (Haftada 1-2 gün spor)</option>
-              <option value="moderate">Orta Aktif (Haftada 3-4 gün spor)</option>
-              <option value="very_active">Çok Aktif (Yoğun spor/antrenman)</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-stone-600 font-medium mb-1">Porsiyon Tercihi</label>
-            <select
-              value={portionPreference}
-              onChange={(e) => setPortionPreference(e.target.value as PortionPreference)}
-              className="w-full px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 font-semibold"
-            >
-              <option value="small">Küçük Porsiyon (~300 ml)</option>
-              <option value="medium">Orta Porsiyon (~450 ml)</option>
-              <option value="large">Büyük Porsiyon (~650 ml)</option>
-            </select>
-          </div>
-        </div>
 
         <div className="pt-2 flex items-center justify-between">
           {savedFeedback && (

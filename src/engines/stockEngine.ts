@@ -252,7 +252,9 @@ export function addOrReplenishStock(
   ingredientId: string,
   amount: number,
   unit: SupportedUnit | string,
-  note?: string
+  note?: string,
+  purchasePrice?: number,
+  purchaseUnit?: SupportedUnit | string
 ): StockItem {
   const stock = getStoredStock();
   const ing = INGREDIENT_MAP[ingredientId];
@@ -268,6 +270,10 @@ export function addOrReplenishStock(
     unit,
     normalizedGramsOrMl: newNormalized,
     updatedAt: new Date().toISOString(),
+    purchasePrice: Number.isFinite(Number(purchasePrice)) && Number(purchasePrice) > 0
+      ? Number(purchasePrice)
+      : existing?.purchasePrice,
+    purchaseUnit: purchaseUnit || existing?.purchaseUnit || unit,
   };
 
   stock[ingredientId] = updatedItem;
@@ -283,6 +289,8 @@ export function addOrReplenishStock(
     normalizedGramsOrMl: addedNormalized,
     date: new Date().toISOString().split('T')[0],
     note: note || 'Stok eklendi / satın alındı',
+    purchasePrice: Number.isFinite(Number(purchasePrice)) && Number(purchasePrice) > 0 ? Number(purchasePrice) : undefined,
+    purchaseUnit: purchaseUnit || unit,
     createdAt: new Date().toISOString(),
   };
   saveStockTransaction(tx);
@@ -302,12 +310,15 @@ export function setExactStock(
   const ing = INGREDIENT_MAP[ingredientId];
   const normalized = normalizeToGramsOrMl(amount, unit, ing);
 
+  const existing = stock[ingredientId];
   const updatedItem: StockItem = {
     ingredientId,
     amount,
     unit,
     normalizedGramsOrMl: Math.max(0, normalized),
     updatedAt: new Date().toISOString(),
+    purchasePrice: existing?.purchasePrice,
+    purchaseUnit: existing?.purchaseUnit || unit,
   };
 
   stock[ingredientId] = updatedItem;

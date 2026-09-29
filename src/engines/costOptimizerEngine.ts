@@ -117,7 +117,7 @@ function getActualPricePerGram(ingredient: Ingredient): number {
   return ingredientReferencePricePerGram(ingredient);
 }
 
-function calculateShakeActualCost(shake: Shake): number {
+export function calculateShakeActualCost(shake: Pick<Shake, 'ingredients'>): number {
   return shake.ingredients.reduce((sum, item) => {
     const ingredientId = canonicalIngredientId(item.ingredientId);
     const ingredient = INGREDIENT_MAP[ingredientId] || INGREDIENT_MAP[item.ingredientId];

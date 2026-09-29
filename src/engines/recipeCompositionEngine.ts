@@ -26,6 +26,7 @@ import {
   ALLOWED_DAIRY_CANONICAL_IDS,
 } from '../utils/recipeValidator.js';
 import { calculatePantryShakeCalorieCapacity, getAvailableStockGrams } from './stockEngine.js';
+import { calculateShakeActualCost } from './costOptimizerEngine.js';
 
 export interface ComposeOptions {
   targetCalories?: number;
@@ -357,6 +358,56 @@ function buildShakeFromIngredientCombo(
     }
   }
 
+  // 3.5. Stock-completion pass: if the selected combo cannot reach the target because
+  // one or more ingredients are nearly depleted, bring in another suitable in-stock
+  // ingredient instead of accepting an avoidable calorie deficit. This preserves the
+  // 3-6 ingredient rule, one-dairy rule and fruit limit while keeping the recipe fully
+  // stock-backed.
+  if (stockOnly && currentNutrition.calories < targetKcal - 30 && selected.length < 6) {
+    const selectedCanonicals = new Set(selected.map((s) => canonicalIngredientId(s.ing.id)));
+    const currentFruitCount = selected.filter((s) =>
+      s.ing.category === 'fruits' || s.ing.category === 'dried_fruits'
+    ).length;
+
+    const completionPool = INGREDIENTS_DATABASE
+      .filter((ing) => {
+        const canon = canonicalIngredientId(ing.id);
+        if (selectedCanonicals.has(canon)) return false;
+        if (canon === 'other_water' || isAllowedDairy(ing.id)) return false;
+        if (!(ing.category === 'grains' || ing.category === 'fruits' || ing.category === 'dried_fruits' || ing.category === 'nuts' || ing.category === 'sweeteners' || ing.category === 'cocoa_extras')) return false;
+        if ((ing.category === 'fruits' || ing.category === 'dried_fruits') && currentFruitCount >= 2) return false;
+        return getAvailableStockGrams(stock, ing.id) > 0;
+      })
+      .sort((a, b) => getIngredientCostPerKcal(a) - getIngredientCostPerKcal(b));
+
+    for (const ing of completionPool) {
+      if (selected.length >= 6 || currentNutrition.calories >= targetKcal - 30) break;
+      const bounds = getCategoryBounds(ing, targetKcal);
+      const available = getAvailableStockGrams(stock, ing.id);
+      const initial = Math.min(bounds.default, bounds.max, available);
+      if (initial <= 0) continue;
+      selected.push({ ing, grams: initial });
+      currentNutrition = calculateShakeNutrition(
+        selected.map((item) => ({ ingredientId: item.ing.id, amount: item.grams, unit: 'g' }))
+      );
+
+      for (let iter = 0; iter < 12 && currentNutrition.calories < targetKcal - 30; iter++) {
+        const item = selected[selected.length - 1];
+        const itemBounds = getCategoryBounds(item.ing, targetKcal);
+        const maxAvailable = Math.min(itemBounds.max, getAvailableStockGrams(stock, item.ing.id));
+        const room = maxAvailable - item.grams;
+        if (room <= 0) break;
+        const kcalPerGram = Math.max(0.4, (item.ing.caloriesPer100g || 100) / 100);
+        const needed = targetKcal - currentNutrition.calories;
+        const step = Math.min(room, Math.max(5, Math.min(Math.ceil(needed / kcalPerGram), Math.round(room * 0.5))));
+        item.grams += step;
+        currentNutrition = calculateShakeNutrition(
+          selected.map((entry) => ({ ingredientId: entry.ing.id, amount: entry.grams, unit: 'g' }))
+        );
+      }
+    }
+  }
+
   // 4. Build final ingredients & calculate nutrition
   const rawShakeIngredients: ShakeIngredient[] = selected
     .filter((s) => s.grams > 0)
@@ -421,7 +472,8 @@ function buildShakeFromIngredientCombo(
 
   const compatibility = analyzeCompatibility(shakeIngredients);
 
-  const costString = finalNutrition.estimatedCost > 0 ? `~${finalNutrition.estimatedCost} TL` : 'Ekonomik';
+  const actualCost = Math.round(calculateShakeActualCost({ ingredients: finalNutrition.ingredients }) * 100) / 100;
+  const costString = actualCost > 0 ? `~${actualCost} TL` : 'Ekonomik';
   const whyChosenReasons: string[] = [
     `Maliyet odaklı formülasyon: Toplam ${costString} maliyetle gereksiz malzeme kalabalığı olmadan hazırlandı`,
     `Günlük hedefe tam uyumlu: Toplam ${totalCalories} kcal (2 eşit porsiyon x ${portionCalories} kcal)`,
@@ -441,7 +493,7 @@ function buildShakeFromIngredientCombo(
     carbs: finalNutrition.carbs,
     fat: finalNutrition.fat,
     fiber: finalNutrition.fiber,
-    estimatedCost: finalNutrition.estimatedCost,
+    estimatedCost: actualCost,
     totalVolumeMl: finalNutrition.totalVolumeMl,
     instructions: [
       'Tüm malzemeleri tek seferde blendere ekleyin.',

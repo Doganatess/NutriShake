@@ -50,6 +50,7 @@ export const StockManager: React.FC<StockManagerProps> = ({ onStockChange }) => 
   const [inputAmount, setInputAmount] = useState<string>('1');
   const [selectedUnit, setSelectedUnit] = useState<SupportedUnit>('adet');
   const [addNote, setAddNote] = useState<string>('');
+  const [purchasePrice, setPurchasePrice] = useState<string>('');
 
   const refreshStock = () => {
     const fresh = getStoredStock();
@@ -126,7 +127,15 @@ export const StockManager: React.FC<StockManagerProps> = ({ onStockChange }) => 
     const amountNum = parseFloat(inputAmount);
     if (isNaN(amountNum) || amountNum <= 0) return;
 
-    addOrReplenishStock(selectedIngredientId, amountNum, selectedUnit, addNote || undefined);
+    const priceNum = parseFloat(purchasePrice.replace(',', '.'));
+    addOrReplenishStock(
+      selectedIngredientId,
+      amountNum,
+      selectedUnit,
+      addNote || undefined,
+      Number.isFinite(priceNum) && priceNum > 0 ? priceNum : undefined,
+      selectedUnit
+    );
     refreshStock();
 
     // Reset & Close
@@ -135,6 +144,7 @@ export const StockManager: React.FC<StockManagerProps> = ({ onStockChange }) => 
     setSearchQuery('');
     setInputAmount('1');
     setAddNote('');
+    setPurchasePrice('');
   };
 
   // Committing a typed amount now fully replaces the old +/- stepper buttons.
@@ -267,6 +277,12 @@ export const StockManager: React.FC<StockManagerProps> = ({ onStockChange }) => 
                       {item.ing?.categoryNameTr}
                     </span>
                   </div>
+                </div>
+
+                <div className={`text-[10px] mt-1 ${item.purchasePrice ? 'text-emerald-700 font-semibold' : 'text-stone-400'}`}>
+                  {item.purchasePrice
+                    ? `Gerçek alış fiyatı: ${item.purchasePrice} TL / ${item.purchaseUnit || item.unit}`
+                    : 'Referans fiyat kullanılacak'}
                 </div>
 
                 <div className="mt-2 flex items-baseline gap-1.5">
@@ -432,6 +448,27 @@ export const StockManager: React.FC<StockManagerProps> = ({ onStockChange }) => 
                     )}
                   </select>
                 </div>
+              </div>
+
+              {/* Purchase Price */}
+              <div>
+                <label className="block text-xs font-bold text-stone-700 mb-1.5">
+                  Alış Fiyatı (Opsiyonel)
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputMode="decimal"
+                    value={purchasePrice}
+                    onChange={(e) => setPurchasePrice(e.target.value)}
+                    placeholder="Örn: 75"
+                    className="w-full px-3 py-2.5 pr-12 rounded-2xl border border-stone-200 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-hidden"
+                  />
+                  <span className="absolute right-3 top-2.5 text-xs font-bold text-stone-400">TL</span>
+                </div>
+                <p className="text-[10px] text-stone-400 mt-1">Bu alışın fiyatını girersen shake maliyeti gerçek satın alma fiyatına göre hesaplanır.</p>
               </div>
 
               {/* Note */}

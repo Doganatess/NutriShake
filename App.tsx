@@ -2,8 +2,9 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   Home,
   Sparkles,
-  Layers,
-  History,
+  Utensils,
+  Package,
+  TrendingUp,
   Settings,
   WifiOff,
   AlertTriangle,
@@ -14,6 +15,7 @@ import {
   DailyPlan,
   MealAnalysis,
   IngredientState,
+  PortionPreference,
 } from './types';
 import {
   getStoredProfile,
@@ -22,14 +24,16 @@ import {
   getStoredMeals,
   getTodayDateString,
   saveDailyPlan,
+  saveStoredProfile,
   getStoredPreferences,
   getStoredDislikedShakes,
   getStoredFavorites,
+  getStoredWeights,
 } from './store/storage';
 import { calculateDailyNutrition } from './utils/nutritionEngine';
 import { generateDailyPlanApi } from './services/apiClient';
-import { generateDailyPlan, calculateOptimalDailyShakeKcal } from './engines/planningEngine';
-import { getStoredStock, getStoredDailyPlans } from './storage/storageAbstraction';
+import { generateDailyPlan } from './engines/planningEngine';
+import { getStoredStock, getStoredDailyPlans, getDailyActivity } from './storage/storageAbstraction';
 import { getIngredientAffinityScores } from './engines/statisticsEngine';
 import { hasDairyInStock } from './engines/recipeCompositionEngine';
 
@@ -37,11 +41,12 @@ import { TodayView } from './views/TodayView';
 import { PlanView } from './views/PlanView';
 import { IngredientsView } from './views/IngredientsView';
 import { HistoryView } from './views/HistoryView';
+import { StatisticsView } from './views/StatisticsView';
 import { SettingsView } from './views/SettingsView';
 import { OnboardingModal } from './components/OnboardingModal';
 import { PWAInstallBanner } from './components/PWAInstallBanner';
 
-type TabType = 'today' | 'plan' | 'ingredients' | 'history' | 'settings';
+type TabType = 'today' | 'shake' | 'nutrition' | 'stock' | 'progress' | 'settings';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('today');
@@ -63,6 +68,8 @@ export default function App() {
   // stale one instead of letting two responses race to write dailyPlan state.
   const generatePlanAbortRef = useRef<AbortController | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
+  const [showPortionPicker, setShowPortionPicker] = useState(false);
+  const [selectedPortionPreference, setSelectedPortionPreference] = useState<PortionPreference>(profile?.portionPreference || 'medium');
 
   // Online / Offline listener
   useEffect(() => {
@@ -85,7 +92,7 @@ export default function App() {
 
   // Daily Nutrition Summary (Deterministic calculation)
   const nutritionSummary = useMemo(() => {
-    return calculateDailyNutrition(profile, dailyPlan, todayMeals);
+    return calculateDailyNutrition(profile, dailyPlan, todayMeals, getDailyActivity(todayStr));
   }, [profile, dailyPlan, todayMeals]);
 
   // Refresh data callback from storage
@@ -99,8 +106,19 @@ export default function App() {
   }, []);
 
   // Generate Daily Shake Plan handler
-  const handleGeneratePlan = async () => {
+  const handleGeneratePlan = async (requestedPortion?: PortionPreference) => {
     if (!profile) return;
+    if (!requestedPortion) {
+      setSelectedPortionPreference(profile.portionPreference || 'medium');
+      setShowPortionPicker(true);
+      return;
+    }
+    setShowPortionPicker(false);
+    const planningProfile = { ...profile, portionPreference: requestedPortion };
+    if (profile.portionPreference !== requestedPortion) {
+      saveStoredProfile(planningProfile);
+      setProfile(planningProfile);
+    }
 
     // FIX (race condition): if a generate-plan request is already in flight, don't let
     // a second rapid click (e.g. mashing "Yeniden Planla") fire another one concurrently.
@@ -137,7 +155,7 @@ export default function App() {
       setGlobalError(
         'Kıvam ve besin dengesi için kilerinizde en az bir süt ürünü (Tam Yağlı Süt, Yarım Yağlı Süt, Köy Yoğurdu veya Süzme Yoğurt) bulunmalıdır. Lütfen önce Malzemeler / Kiler sekmesine gidip bu ürünlerden en az birini ekleyin.'
       );
-      setActiveTab('ingredients');
+      setActiveTab('stock');
       return;
     }
 
@@ -174,21 +192,24 @@ export default function App() {
           ? [`Kullanıcı geçmişte şu malzemeleri içeren shake'leri belirgin şekilde daha çok beğendi: ${topAffinityIngredients.join(', ')}. Mümkün olduğunda bunlardan birini tarife dahil et.`]
           : [];
 
-      // Optimal daily shake calories calculated by Planning Engine (~800 - 1400 kcal)
-      // Main meal calories are independent and NOT subtracted from the shake target
-      const optimalShakeKcal = calculateOptimalDailyShakeKcal(profile);
+      // Shake planning follows the current day's remaining need. Breakfast is a
+      // gate for shake generation only; the rest of the app remains usable without it.
+      const hasBreakfast = todayMeals.some((meal) => meal.mealType === 'breakfast' && (meal.status || 'confirmed') === 'confirmed');
+      if (!hasBreakfast) {
+        setGlobalError('Shake oluşturmak için önce kahvaltını ekleyip onaylamalısın.');
+        return;
+      }
 
       const plan = await generateDailyPlanApi({
         date: todayStr,
-        // FIX: Previously this sent the user's general diet calorie goal (profile.calorieGoal),
-        // which silently overrode the fixed ~3200 kcal shake target computed by
-        // calculateOptimalDailyShakeKcal(). The server reads exactly this field
-        // (dailyGoalKcal) as the shake calorie target, so it must be optimalShakeKcal.
-        dailyGoalKcal: optimalShakeKcal,
-        consumedMealsKcal: nutritionSummary.analyzedMealCalories,
-        remainingKcalNeeded: optimalShakeKcal,
+        dailyGoalKcal: nutritionSummary.calorieGoal,
+        consumedMealsKcal: nutritionSummary.consumedCalories,
+        remainingKcalNeeded: nutritionSummary.remainingCalories,
+        remainingProtein: nutritionSummary.targetProtein !== undefined ? Math.max(0, nutritionSummary.targetProtein - nutritionSummary.consumedProtein) : undefined,
+        remainingCarbs: nutritionSummary.targetCarbs !== undefined ? Math.max(0, nutritionSummary.targetCarbs - nutritionSummary.consumedCarbs) : undefined,
+        remainingFat: nutritionSummary.targetFat !== undefined ? Math.max(0, nutritionSummary.targetFat - nutritionSummary.consumedFat) : undefined,
         shakeCount: 1, // 1 daily recipe -> 2 equal portions
-        portionPreference: profile.portionPreference,
+        portionPreference: requestedPortion,
         mandatoryIngredientIds: mandatoryIds,
         allowedIngredientIds: allowedIds,
         forbiddenIngredientIds: forbiddenIds,
@@ -204,7 +225,7 @@ export default function App() {
 
       saveDailyPlan(plan);
       setDailyPlan(plan);
-      setActiveTab('plan');
+      setActiveTab('shake');
     } catch (err: unknown) {
       // Intentionally cancelled because a newer request superseded this one — not a
       // real failure, so no error message and no deterministic fallback.
@@ -214,9 +235,9 @@ export default function App() {
       console.warn('AI Plan generation unavailable or offline, generating deterministic plan:', err);
       // Deterministic planning engine fallback
       try {
-        const fallbackPlan = generateDailyPlan(todayStr, profile);
+        const fallbackPlan = generateDailyPlan(todayStr, planningProfile, { meals: todayMeals });
         setDailyPlan(fallbackPlan);
-        setActiveTab('plan');
+        setActiveTab('shake');
       } catch (fallbackErr) {
         console.error('Deterministic plan failed:', fallbackErr);
         const msg = fallbackErr instanceof Error ? fallbackErr.message : (err instanceof Error ? err.message : 'Plan oluşturulamadı.');
@@ -246,7 +267,40 @@ export default function App() {
     return getStoredPreferences().map((p) => p.note);
   }, []);
 
+  if (!profile) {
+    return (
+      <OnboardingModal
+        onComplete={(newProfile) => {
+          setProfile(newProfile);
+          setActiveTab('today');
+        }}
+        onNavigateToToday={() => setActiveTab('today')}
+      />
+    );
+  }
+
   return (
+    <>
+      {showPortionPicker && (
+        <div className="fixed inset-0 z-[100] bg-black/35 backdrop-blur-[2px] flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-[2rem] bg-white border border-stone-200 shadow-2xl p-5">
+            <div className="text-[11px] uppercase tracking-wider font-black text-emerald-700">Shake oluştur</div>
+            <h2 className="mt-1 text-2xl font-black tracking-tight text-stone-900">Porsiyon hacmini seç</h2>
+            <p className="mt-2 text-sm leading-6 text-stone-500">Bu seçim şu an oluşturacağın shake için geçerli. Daha sonra tekrar değiştirebilirsin.</p>
+            <div className="grid grid-cols-3 gap-2 mt-5">
+              {(['small', 'medium', 'large'] as PortionPreference[]).map((size) => (
+                <button key={size} onClick={() => setSelectedPortionPreference(size)} className={`rounded-2xl border px-3 py-4 text-sm font-black transition ${selectedPortionPreference === size ? 'border-emerald-600 bg-emerald-50 text-emerald-800' : 'border-stone-200 bg-stone-50 text-stone-600'}`}>
+                  {size === 'small' ? 'Küçük' : size === 'medium' ? 'Orta' : 'Büyük'}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-4">
+              <button onClick={() => setShowPortionPicker(false)} className="py-3 rounded-2xl bg-stone-100 text-stone-700 font-bold text-sm">Vazgeç</button>
+              <button onClick={() => handleGeneratePlan(selectedPortionPreference)} className="py-3 rounded-2xl bg-stone-900 text-white font-black text-sm">Shake'leri üret</button>
+            </div>
+          </div>
+        </div>
+      )}
     <div className="min-h-screen bg-stone-50 text-stone-900 flex flex-col antialiased selection:bg-emerald-100 selection:text-emerald-900 font-sans">
       {/* Offline Alert */}
       {!isOnline && (
@@ -310,14 +364,14 @@ export default function App() {
                   plan={dailyPlan}
                   meals={todayMeals}
                   nutritionSummary={nutritionSummary}
-                  onNavigateToPlan={() => setActiveTab('plan')}
+                  onNavigateToPlan={() => setActiveTab('shake')}
                   onRefreshData={handleRefreshData}
                   onRequestGeneratePlan={handleGeneratePlan}
                   isGeneratingPlan={isGeneratingPlan}
                 />
               )}
 
-              {activeTab === 'plan' && (
+              {activeTab === 'shake' && (
                 <PlanView
                   profile={profile}
                   plan={dailyPlan}
@@ -330,20 +384,28 @@ export default function App() {
                 />
               )}
 
-              {activeTab === 'ingredients' && (
+              {activeTab === 'stock' && (
                 <IngredientsView
                   ingredientStates={ingredientStates}
                   onUpdateStates={(newStates) => {
                     setIngredientStates(newStates);
                   }}
-                  currentPlan={dailyPlan}
                 />
               )}
 
-              {activeTab === 'history' && (
+              {activeTab === 'nutrition' && (
                 <HistoryView
                   profile={profile}
                   onRefreshData={handleRefreshData}
+                />
+              )}
+
+              {activeTab === 'progress' && (
+                <StatisticsView
+                  profile={profile}
+                  dailyPlans={getStoredDailyPlans()}
+                  meals={allMeals}
+                  weights={getStoredWeights()}
                 />
               )}
 
@@ -390,39 +452,51 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setActiveTab('plan')}
+            onClick={() => setActiveTab('shake')}
             className={`flex flex-col items-center justify-center py-1 px-3 rounded-2xl transition active:scale-95 ${
-              activeTab === 'plan'
+              activeTab === 'shake'
                 ? 'text-emerald-700 font-bold'
                 : 'text-stone-500 font-medium hover:text-stone-800'
             }`}
           >
             <Sparkles className="w-5 h-5 mb-0.5" />
-            <span className="text-[10px] tracking-tight">Plan</span>
+            <span className="text-[10px] tracking-tight">Shake</span>
           </button>
 
           <button
-            onClick={() => setActiveTab('ingredients')}
+            onClick={() => setActiveTab('stock')}
             className={`flex flex-col items-center justify-center py-1 px-3 rounded-2xl transition active:scale-95 ${
-              activeTab === 'ingredients'
+              activeTab === 'stock'
                 ? 'text-emerald-700 font-bold'
                 : 'text-stone-500 font-medium hover:text-stone-800'
             }`}
           >
-            <Layers className="w-5 h-5 mb-0.5" />
-            <span className="text-[10px] tracking-tight">Malzemeler</span>
+            <Package className="w-5 h-5 mb-0.5" />
+            <span className="text-[10px] tracking-tight">Stok</span>
           </button>
 
           <button
-            onClick={() => setActiveTab('history')}
+            onClick={() => setActiveTab('nutrition')}
             className={`flex flex-col items-center justify-center py-1 px-3 rounded-2xl transition active:scale-95 ${
-              activeTab === 'history'
+              activeTab === 'nutrition'
                 ? 'text-emerald-700 font-bold'
                 : 'text-stone-500 font-medium hover:text-stone-800'
             }`}
           >
-            <History className="w-5 h-5 mb-0.5" />
-            <span className="text-[10px] tracking-tight">Geçmiş</span>
+            <Utensils className="w-5 h-5 mb-0.5" />
+            <span className="text-[10px] tracking-tight">Beslenme</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('progress')}
+            className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-2xl transition active:scale-95 ${
+              activeTab === 'progress'
+                ? 'text-emerald-700 font-bold'
+                : 'text-stone-500 font-medium hover:text-stone-800'
+            }`}
+          >
+            <TrendingUp className="w-5 h-5 mb-0.5" />
+            <span className="text-[10px] tracking-tight">İlerleme</span>
           </button>
 
           <button
@@ -439,17 +513,7 @@ export default function App() {
         </div>
       </nav>
 
-      {/* Onboarding Modal (Opens if user profile is null on clean initial launch) */}
-      {!profile && (
-        <OnboardingModal
-          onComplete={(newProfile) => {
-            setProfile(newProfile);
-          }}
-          onNavigateToIngredients={() => {
-            setActiveTab('ingredients');
-          }}
-        />
-      )}
     </div>
+    </>
   );
 }

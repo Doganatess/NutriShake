@@ -225,6 +225,8 @@ export interface StockItem {
   normalizedGramsOrMl: number; // Converted to standard grams or ml
   updatedAt: string;
   costPerUnit?: number;
+  purchasePrice?: number;
+  purchaseUnit?: SupportedUnit | string;
   lowStockThreshold?: number; // Warning threshold in normalized grams
 }
 
@@ -239,6 +241,8 @@ export interface StockTransaction {
   relatedShakeId?: string;
   relatedPlanId?: string;
   note?: string;
+  purchasePrice?: number;
+  purchaseUnit?: SupportedUnit | string;
   createdAt: string;
 }
 

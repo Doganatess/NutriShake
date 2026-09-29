@@ -378,7 +378,7 @@ export function estimateCalorieNeeds(
   // Target pace is kg/month for the existing UI unless a weekly pace is passed
   // through a future caller. For now the legacy positional argument remains
   // interpreted as kg/month, but no default of +5 kg/month is used.
-  const safeMonthlyPace = Math.min(2, Math.max(0, targetPace ?? 1));
+  const safeMonthlyPace = Math.min(10, Math.max(0, targetPace ?? 0));
   const targetPaceKgPerWeek = safeMonthlyPace / 4.345;
 
   let dailyAdjustmentKcal = 0;
@@ -391,7 +391,7 @@ export function estimateCalorieNeeds(
 
   // Keep automatic targets within a controlled range. Users can still override
   // the final calorie goal through the existing custom-calorie setting.
-  dailyAdjustmentKcal = Math.max(-750, Math.min(750, dailyAdjustmentKcal));
+  dailyAdjustmentKcal = Math.max(-1500, Math.min(1500, dailyAdjustmentKcal));
 
   const recommendedGoal = Math.max(
     1200,

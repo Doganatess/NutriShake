@@ -62,7 +62,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [portionPreference, setPortionPreference] = useState<PortionPreference>(profile.portionPreference);
   const [calorieGoal, setCalorieGoal] = useState<number>(profile.calorieGoal);
   const [proteinGoal, setProteinGoal] = useState<number>(profile.proteinGoal);
-  const [monthlyWeightGoalKg, setMonthlyWeightGoalKg] = useState<number>(profile.monthlyWeightGoalKg || 5);
+  const [targetPace, setTargetPace] = useState<number>(profile.goalSettings?.targetPace ?? profile.monthlyWeightGoalKg ?? 0.25);
+  const [targetPaceUnit, setTargetPaceUnit] = useState<'kg_per_week' | 'kg_per_month'>(profile.goalSettings?.targetPaceUnit ?? 'kg_per_week');
   const [savedFeedback, setSavedFeedback] = useState<boolean>(false);
 
   // AI Memory / Preferences
@@ -79,7 +80,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // Handle Profile Save
   const handleSaveProfile = () => {
-    const dailySurplusKcal = Math.round((monthlyWeightGoalKg * 7700) / 30);
+    const pacePerWeek = targetPaceUnit === 'kg_per_week' ? targetPace : targetPace / 4.345;
+    const dailyAdjustmentKcal = Math.round((pacePerWeek * 7700) / 7);
+    const goalSettings = {
+      ...(profile.goalSettings || {}),
+      targetWeightKg: targetWeight,
+      targetPace,
+      targetPaceUnit,
+      adjustmentKcal: profile.goal === 'gain_weight' ? dailyAdjustmentKcal : profile.goal === 'lose_weight' ? -dailyAdjustmentKcal : 0,
+    };
     const updated: UserProfile = {
       ...profile,
       currentWeight,
@@ -90,8 +99,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       portionPreference,
       calorieGoal,
       proteinGoal,
-      monthlyWeightGoalKg,
-      dailySurplusKcal,
+      goalSettings,
+      monthlyWeightGoalKg: undefined,
+      dailySurplusKcal: undefined,
       updatedAt: new Date().toISOString(),
     };
 
@@ -103,7 +113,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // Recalculate Recommendation
   const handleRecalculateNeeds = () => {
-    const rec = estimateCalorieNeeds(currentWeight, height, targetWeight, activityLevel, 28, monthlyWeightGoalKg);
+    const rec = estimateCalorieNeeds(
+      currentWeight, height, targetWeight,
+      {
+        workMovement: profile.workMovement,
+        sportType: profile.sportType,
+        sportDaysPerWeek: profile.sportDaysPerWeek,
+        sportMinutesPerSession: profile.sportMinutesPerSession,
+        sportIntensity: profile.sportIntensity,
+        generalMovement: profile.generalMovement,
+        status: 'normal',
+      },
+      profile.age,
+      targetPaceUnit === 'kg_per_week' ? targetPace * 4.345 : targetPace,
+      profile.gender,
+    );
     setCalorieGoal(rec.recommendedGoal);
     setProteinGoal(rec.proteinGoal);
   };
@@ -259,14 +283,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             />
           </div>
           <div>
-            <label className="block text-stone-600 font-medium mb-1">Aylık Kilo Alma Hedefi (kg)</label>
-            <input
-              type="number"
-              step="0.5"
-              value={monthlyWeightGoalKg}
-              onChange={(e) => setMonthlyWeightGoalKg(parseFloat(e.target.value) || 5)}
-              className="w-full px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 font-bold text-emerald-800"
-            />
+            <label className="block text-stone-600 font-medium mb-1">Hedef Temposu</label>
+            <div className="flex gap-2">
+              <input
+                type="number"
+                step="0.05"
+                min="0"
+                value={targetPace}
+                onChange={(e) => setTargetPace(parseFloat(e.target.value) || 0)}
+                className="flex-1 px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 font-bold text-emerald-800"
+              />
+              <select value={targetPaceUnit} onChange={(e) => setTargetPaceUnit(e.target.value as 'kg_per_week' | 'kg_per_month')} className="px-3 py-2 border border-stone-200 rounded-xl bg-stone-50 text-xs font-bold">
+                <option value="kg_per_week">kg/hafta</option>
+                <option value="kg_per_month">kg/ay</option>
+              </select>
+            </div>
           </div>
           <div>
             <label className="block text-stone-600 font-medium mb-1">Günlük Shake Modeli</label>
@@ -279,10 +310,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         {/* Aylık Hedef Projeksiyon Bilgilendirmesi */}
         <div className="p-3 bg-amber-50/90 border border-amber-200 rounded-2xl text-xs space-y-1">
           <div className="font-bold text-amber-950 flex items-center gap-1.5">
-            <span>🎯</span> Aylık Kilo Alma Hedefi: +{monthlyWeightGoalKg} KG Planı
+            <span>🎯</span> Hedef temposu: {targetPace} {targetPaceUnit === 'kg_per_week' ? 'kg/hafta' : 'kg/ay'}
           </div>
           <p className="text-[11px] text-amber-900 leading-relaxed">
-            Hedeflenen aylık artış: <strong>+{monthlyWeightGoalKg} kg</strong> (Günlük hedeflenen planlı kalori fazlası: <strong>~{Math.round((monthlyWeightGoalKg * 7700) / 30)} kcal</strong>).
+            Seçtiğin tempo, günlük enerji ayarına çevrilerek kalori motoruna aktarılır.
           </p>
           <p className="text-[10px] text-amber-800/90 italic leading-snug">
             * Bu plan bir hedef ve bilimsel enerji projeksiyonudur. Bireysel metabolizma hızınıza, vardiya saatlerinize ve fiziksel iş yoğunluğunuza göre gerçek kilo artışı değişkenlik gösterebilir.

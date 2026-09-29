@@ -55,7 +55,7 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({ currentPlan, savedPl
     if (item) {
       if (!isCurrentlyChecked) {
         // Marking as purchased: Add retail amount to pantry stock
-        const amountToAdd = item.totalGramsOrMl || 100;
+        const amountToAdd = item.neededAmount || 100;
         addOrReplenishStock(
           item.ingredientId,
           amountToAdd,
@@ -64,7 +64,7 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({ currentPlan, savedPl
         );
       } else {
         // Unmarking: Reverse the addition safely
-        const amountToDeduct = item.totalGramsOrMl || 100;
+        const amountToDeduct = item.neededAmount || 100;
         deductRecipeStock(
           [{ ingredientId: item.ingredientId, amount: amountToDeduct }],
           `Alışveriş işareti geri alındı: ${item.name}`
@@ -292,7 +292,7 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({ currentPlan, savedPl
                             {item.name}
                           </div>
                           <div className="text-[10px] text-stone-500">
-                            Tarif İhtiyacı: ~{item.totalGramsOrMl}{' '}
+                            Eksik: ~{item.neededAmount}{' '}
                             {item.unit === 'ml' ? 'ml' : 'g'}
                           </div>
                         </div>

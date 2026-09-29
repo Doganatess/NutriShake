@@ -1,31 +1,82 @@
-import { Shake, ShoppingItem } from '../types';
-import { INGREDIENT_MAP } from '../data/ingredients';
+import { Shake, ShoppingItem, StockItem } from '../types';
+import { INGREDIENT_MAP, canonicalIngredientId } from '../data/ingredients';
+import { getStoredStock, getStoredStockTransactions } from '../storage/storageAbstraction';
 
 /**
- * Formats grams or ml into friendly Turkish retail units
- * e.g., 2500ml -> "2.5 L", 1200g -> "1.2 kg", 250g -> "250 g", 6 adet -> "6 adet"
+ * Formats grams or ml into friendly Turkish retail units.
  */
 export function formatRetailQuantity(gramsOrMl: number, isLiquid: boolean): string {
+  const safe = Math.max(0, Number(gramsOrMl) || 0);
   if (isLiquid) {
-    if (gramsOrMl >= 1000) {
-      const liters = Math.round((gramsOrMl / 1000) * 10) / 10;
-      return `${liters} L`;
-    }
-    return `${Math.round(gramsOrMl)} ml`;
+    if (safe >= 1000) return `${Math.round((safe / 1000) * 10) / 10} L`;
+    return `${Math.round(safe)} ml`;
   }
+  if (safe >= 1000) return `${Math.round((safe / 1000) * 10) / 10} kg`;
+  return `${Math.round(safe)} g`;
+}
 
-  if (gramsOrMl >= 1000) {
-    const kg = Math.round((gramsOrMl / 1000) * 10) / 10;
-    return `${kg} kg`;
+type PriceLike = {
+  purchasePrice?: number;
+  purchaseUnit?: string;
+  normalizedGramsOrMl?: number;
+  amount?: number;
+};
+
+function normalizePriceUnit(unit?: string): string {
+  return String(unit || '').toLowerCase().replace(/\s+/g, '');
+}
+
+function pricePerNormalizedUnit(item?: PriceLike): number {
+  if (!item) return 0;
+  const price = Number(item.purchasePrice || 0);
+  if (!Number.isFinite(price) || price <= 0) return 0;
+  const unit = normalizePriceUnit(item.purchaseUnit);
+  if (unit.includes('kg')) return price / 1000;
+  if (unit === 'l' || unit.includes('litre')) return price / 1000;
+  if (unit.includes('100g') || unit.includes('100ml')) return price / 100;
+  if (unit === 'g' || unit === 'ml') return price;
+  const normalized = Number(item.normalizedGramsOrMl || item.amount || 0);
+  return normalized > 0 ? price / normalized : 0;
+}
+
+function getActualPricePerNormalizedUnit(ingredientId: string): number {
+  const canonical = canonicalIngredientId(ingredientId);
+  const stock = getStoredStock();
+  const stockKey = Object.keys(stock).find((key) => canonicalIngredientId(key) === canonical);
+  const stockItem = stockKey ? stock[stockKey] : undefined;
+  const direct = pricePerNormalizedUnit(stockItem as StockItem | undefined);
+  if (direct > 0) return direct;
+
+  const transactions = getStoredStockTransactions();
+  const purchases = transactions
+    .filter((tx: any) => tx?.type === 'purchase' && canonicalIngredientId(String(tx.ingredientId || '')) === canonical)
+    .map((tx: any) => {
+      const price = Number(tx.purchasePrice || 0);
+      const amount = Number(tx.normalizedGramsOrMl || 0);
+      return price > 0 && amount > 0 ? price / amount : 0;
+    })
+    .filter((value: number) => value > 0);
+
+  if (purchases.length) return purchases[purchases.length - 1];
+
+  const ing = INGREDIENT_MAP[canonical] || INGREDIENT_MAP[ingredientId];
+  if (!ing) return 0;
+  const referencePrice = Number(ing.estimatedPrice || 0);
+  if (referencePrice <= 0) return 0;
+  const unit = normalizePriceUnit(ing.priceUnit);
+  if (unit.includes('kg') || unit === 'l' || unit.includes('litre')) return referencePrice / 1000;
+  if (unit.includes('100g') || unit.includes('100ml')) return referencePrice / 100;
+  if (unit.includes('adet') || unit.includes('tane') || unit.includes('şişe')) {
+    const serving = Number(ing.edibleWeight || ing.defaultServing || 100);
+    return serving > 0 ? referencePrice / serving : 0;
   }
-
-  return `${Math.round(gramsOrMl)} g`;
+  return referencePrice / 1000;
 }
 
 /**
- * Smart Shopping List Engine (Requirement 29)
- * Aggregates ingredients from multiple shakes across 1, 3, or 7 days
- * into a consolidated market checklist with calculated estimated prices.
+ * Smart Shopping List Engine. The list is derived from planned shake quantities
+ * minus the user's real pantry stock. Cost uses the user's purchase price when
+ * available, then purchase history, then the ingredient reference price.
  */
 export function generateShoppingList(
   arg1: any,
@@ -34,88 +85,71 @@ export function generateShoppingList(
 ): ShoppingItem[] & { items: ShoppingItem[]; totalEstimatedCost: number } {
   let shakes: Shake[] = [];
   let multiplier = 1;
-  let existingCheckedIds: Set<string> = new Set();
+  const existingCheckedIds: Set<string> = arg3 instanceof Set ? arg3 : new Set();
 
   if (Array.isArray(arg1)) {
     shakes = arg1;
-    multiplier = typeof arg2 === 'number' ? arg2 : 1;
-    if (arg3 instanceof Set) existingCheckedIds = arg3;
+    multiplier = typeof arg2 === 'number' ? Math.max(1, Math.min(7, arg2)) : 1;
   } else {
-    // Called as (currentPlan, savedPlans, daysScope)
     const currentPlan = arg1;
     const savedPlans = arg2 || {};
-    const daysScope = typeof arg3 === 'number' ? arg3 : 3;
+    const daysScope = typeof arg3 === 'number' ? Math.max(1, Math.min(7, arg3)) : 3;
 
-    if (currentPlan && currentPlan.shakes) {
-      shakes.push(...currentPlan.shakes);
-    }
-
-    const otherPlans = Object.values(savedPlans) as any[];
-    otherPlans.forEach((p) => {
-      if (p && p.id !== currentPlan?.id && p.shakes) {
-        shakes.push(...p.shakes);
-      }
+    if (currentPlan?.shakes) shakes.push(...currentPlan.shakes);
+    Object.values(savedPlans).forEach((p: any) => {
+      if (p && p.id !== currentPlan?.id && Array.isArray(p.shakes)) shakes.push(...p.shakes);
     });
 
-    if (daysScope > 1 && shakes.length > 0) {
-      multiplier = Math.min(daysScope, 7);
-    }
+    // Saved future plans are already day-specific; only use a multiplier when
+    // the caller supplied a single-shake array. Do not multiply a multi-day plan
+    // a second time.
+    multiplier = 1;
+    if (shakes.length === 1 && daysScope > 1) multiplier = daysScope;
   }
 
-  const aggregatedMap: Record<
-    string,
-    {
-      totalGrams: number;
-      totalCost: number;
-    }
-  > = {};
-
+  const aggregatedMap: Record<string, { totalRequired: number }> = {};
   shakes.forEach((shake) => {
     shake.ingredients?.forEach((item) => {
-      const amount = (item.normalizedGrams || item.amount || 50) * multiplier;
-      const ing = INGREDIENT_MAP[item.ingredientId];
-      const cost = ing ? (ing.estimatedPrice * (amount / 100)) : 0;
-
-      if (!aggregatedMap[item.ingredientId]) {
-        aggregatedMap[item.ingredientId] = {
-          totalGrams: amount,
-          totalCost: cost,
-        };
-      } else {
-        aggregatedMap[item.ingredientId].totalGrams += amount;
-        aggregatedMap[item.ingredientId].totalCost += cost;
-      }
+      const canonicalId = canonicalIngredientId(item.ingredientId);
+      const amount = Math.max(0, Number(item.normalizedGrams || item.amount || 0)) * multiplier;
+      if (!amount) return;
+      aggregatedMap[canonicalId] = aggregatedMap[canonicalId] || { totalRequired: 0 };
+      aggregatedMap[canonicalId].totalRequired += amount;
     });
   });
 
-  const shoppingList: ShoppingItem[] = Object.entries(aggregatedMap).map(([id, data]) => {
-    const ing = INGREDIENT_MAP[id];
+  const stock = getStoredStock();
+  const shoppingList: ShoppingItem[] = Object.entries(aggregatedMap).map(([canonicalId, data]) => {
+    const ing = INGREDIENT_MAP[canonicalId];
+    const stockKey = Object.keys(stock).find((key) => canonicalIngredientId(key) === canonicalId);
+    const currentStock = Math.max(0, Number(stockKey ? stock[stockKey]?.normalizedGramsOrMl : 0) || 0);
+    const neededAmount = Math.max(0, data.totalRequired - currentStock);
     const isLiquid = ing?.shakeCompatibility === 'liquid';
-    const displayQuantity = formatRetailQuantity(data.totalGrams, !!isLiquid);
-    const grams = Math.round(data.totalGrams);
+    const displayQuantity = formatRetailQuantity(neededAmount, !!isLiquid);
+    const pricePerUnit = getActualPricePerNormalizedUnit(canonicalId);
+    const estimatedCost = Math.round(neededAmount * pricePerUnit * 10) / 10;
 
     return {
-      id: `shop_${id}`,
-      ingredientId: id,
-      name: ing?.name || id,
+      id: `shop_${canonicalId}`,
+      ingredientId: canonicalId,
+      name: ing?.name || canonicalId,
       category: ing?.category || 'others',
       categoryNameTr: ing?.categoryNameTr || 'Diğer',
-      requiredAmount: grams,
-      currentStock: 0,
-      neededAmount: grams,
-      totalGrams: grams,
-      retailDisplay: displayQuantity,
-      displayQuantity,
-      estimatedCost: Math.round(data.totalCost * 10) / 10,
-      checked: existingCheckedIds.has(`shop_${id}`),
+      requiredAmount: Math.round(data.totalRequired),
+      currentStock: Math.round(currentStock),
+      neededAmount: Math.round(neededAmount),
+      totalGrams: Math.round(data.totalRequired),
+      totalGramsOrMl: Math.round(neededAmount),
+      retailDisplay: neededAmount > 0 ? displayQuantity : 'Stok yeterli',
+      displayQuantity: neededAmount > 0 ? displayQuantity : 'Stok yeterli',
+      estimatedCost,
+      checked: existingCheckedIds.has(`shop_${canonicalId}`),
+      unit: isLiquid ? 'ml' : 'g',
     };
-  });
+  }).filter((item) => item.neededAmount > 0);
 
-  // Sort by category and name
   shoppingList.sort((a, b) => {
-    if (a.category !== b.category) {
-      return (a.categoryNameTr || '').localeCompare(b.categoryNameTr || '', 'tr');
-    }
+    if (a.category !== b.category) return (a.categoryNameTr || '').localeCompare(b.categoryNameTr || '', 'tr');
     return a.name.localeCompare(b.name, 'tr');
   });
 
@@ -123,9 +157,8 @@ export function generateShoppingList(
     shoppingList.reduce((acc, item) => acc + (item.estimatedCost || 0), 0) * 10
   ) / 10;
 
-  const result = shoppingList as any;
+  const result = shoppingList as ShoppingItem[] & { items: ShoppingItem[]; totalEstimatedCost: number };
   result.items = shoppingList;
   result.totalEstimatedCost = totalEstimatedCost;
-
   return result;
 }

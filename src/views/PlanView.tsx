@@ -7,6 +7,7 @@ import {
   Sliders,
   Calendar,
   Plus,
+  Crown,
 } from 'lucide-react';
 import {
   DailyPlan,
@@ -595,6 +596,26 @@ export const PlanView: React.FC<PlanViewProps> = ({
                   isReplacing={replacingShakeId === shake.id}
                 />
               ))}
+
+              {/* Premium teaser: visible to free users without acting as an entitlement/security gate. */}
+              {profile.entitlement?.plan !== 'premium' && (
+                <div className="rounded-3xl border border-violet-200 bg-violet-50/70 p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-violet-100 text-violet-700 flex items-center justify-center shrink-0">
+                      <Crown className="w-4 h-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-black text-violet-950">Premium Alternatifler</h4>
+                        <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-violet-200 text-violet-800">Premium</span>
+                      </div>
+                      <p className="text-[11px] leading-relaxed text-violet-900/80 mt-1">
+                        Daha fazla kişiselleştirilmiş shake alternatifi, gelişmiş tercih öğrenme ve planlama seçenekleri Premium kapsamında sunulabilir. Bu kart yalnızca özelliği tanıtır; Premium yetkisi burada doğrulanmaz.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

@@ -38,8 +38,8 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({
   }, [dailyPlans, meals, profile.calorieGoal, timeRange]);
 
   const weightStats = useMemo(() => {
-    return computeWeightStats(weights, profile.targetWeight);
-  }, [weights, profile.targetWeight]);
+    return computeWeightStats(weights, profile.targetWeight, profile.goal);
+  }, [weights, profile.targetWeight, profile.goal]);
 
   const varietyMetrics = useMemo(() => {
     const plansList = Object.values(dailyPlans);
@@ -275,15 +275,17 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({
           </div>
         </div>
 
-        {/* Projection insight text */}
+        {/* P3 trend insight: use the user's actual weigh-ins, never a fixed weight-loss/gain claim. */}
         <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-3 text-[11px] text-emerald-950 flex items-start gap-2">
           <TrendingUp className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
           <p className="leading-relaxed">
-            {profile.goal === 'gain_weight'
-              ? `Günlük +${Math.max(0, profile.calorieGoal - profile.maintenanceCalories)} kcal fazlalıkla, ayda yaklaşık 1.5 - 2.0 kg sağlıklı ve kaliteli kilo artışı hedeflenmektedir.`
-              : profile.goal === 'lose_weight'
-              ? `Günlük kalori açığınızla ayda yaklaşık 1.5 - 2.0 kg yağ kaybı projeksiyonu hesaplanmaktadır.`
-              : 'Günlük bakım kalorinizle mevcut kilonuzun dengeli korunması hedeflenmektedir.'}
+            {weightStats.remainingToTargetKg === 0
+              ? 'Mevcut ölçümünüz hedef kilonuzla aynı. Trend değiştikçe bu alan güncellenecek.'
+              : !weightStats.hasEnoughTrendData
+              ? 'Kişisel trendi daha güvenilir hesaplamak için en az 3 tartı kaydı ve en az 7 günlük veri gerekiyor.'
+              : weightStats.estimatedWeeksToTarget !== null
+              ? `Mevcut tartı trendiniz yaklaşık ${weightStats.smoothedWeeklyVelocityKg > 0 ? '+' : ''}${weightStats.smoothedWeeklyVelocityKg} kg/hafta. Bu hız korunursa hedefe yaklaşık ${weightStats.estimatedWeeksToTarget} hafta kalabilir.`
+              : 'Mevcut tartı trendi hedef yönünüzle uyumlu değil veya değişim hızı çok düşük. Uygulama hedef tarihi varsaymak yerine yeni ölçümlerle trendi güncelleyecek.'}
           </p>
         </div>
       </div>

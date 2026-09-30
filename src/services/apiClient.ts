@@ -166,13 +166,6 @@ export async function consumeUsageApi(feature: 'free_shake_weekly' | 'rewarded_a
   return data;
 }
 
-export async function getUsageApi(feature: 'free_shake_weekly' | 'rewarded_ai_generation_daily') {
-  const res = await fetch(`/api/usage?feature=${encodeURIComponent(feature)}`);
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(data.error || 'Kullanım bilgisi alınamadı.');
-  return data as { feature: string; period: string; used: number; limit: number | null; unlimited: boolean };
-}
-
 export async function getRewardCreditsApi() {
   const res = await fetch('/api/rewards');
   const data = await res.json().catch(() => ({}));
@@ -191,23 +184,14 @@ export async function consumeRewardCreditApi() {
   return data;
 }
 
-export async function initializeSubscriptionCheckoutApi(input: { name: string; surname: string; gsmNumber: string }) {
-  const res = await fetch('/api/subscription-checkout', {
+export async function syncDataApi(snapshot: unknown) {
+  const res = await fetch('/api/sync', {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
+    body: JSON.stringify({ snapshot }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(data.error || 'Premium aboneliği başlatılamadı.');
-  return data as { token: string; checkoutFormContent: string; conversationId?: string };
-}
-
-export async function cancelSubscriptionApi() {
-  const res = await fetch('/api/subscription-cancel', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(data.error || 'Abonelik iptal edilemedi.');
+  if (!res.ok) throw new ApiError(data.error || 'Senkronizasyon başarısız oldu.');
   return data;
 }

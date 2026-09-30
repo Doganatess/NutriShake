@@ -40,7 +40,7 @@ import {
 } from '../storage/storageAbstraction';
 import { estimateCalorieNeeds } from '../utils/nutritionEngine';
 import { getIngredientAffinityScores } from '../engines/statisticsEngine';
-import { loginApi, logoutApi, signupApi } from '../services/apiClient';
+import { getRewardCreditsApi, getUsageApi, loginApi, logoutApi, signupApi } from '../services/apiClient';
 
 interface SettingsViewProps {
   profile: UserProfile;
@@ -71,6 +71,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [accountLoading, setAccountLoading] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
   const [accountMessage, setAccountMessage] = useState<string | null>(null);
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageError, setUsageError] = useState<string | null>(null);
+  const [weeklyShakeUsage, setWeeklyShakeUsage] = useState<{ used: number; limit: number | null; unlimited: boolean } | null>(null);
+  const [dailyAiUsage, setDailyAiUsage] = useState<{ used: number; limit: number | null; unlimited: boolean } | null>(null);
+  const [rewardCredits, setRewardCredits] = useState<number | null>(null);
 
   const currentWeight = Number(currentWeightText) || 0;
   const targetWeight = Number(targetWeightText) || 0;
@@ -137,6 +142,30 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   const hasServerAccount = Boolean(profile.id && profile.entitlement);
+
+  const refreshUsageStatus = async () => {
+    if (!hasServerAccount) return;
+    setUsageLoading(true);
+    setUsageError(null);
+    try {
+      const [weekly, daily, rewards] = await Promise.all([
+        getUsageApi('free_shake_weekly'),
+        getUsageApi('rewarded_ai_generation_daily'),
+        getRewardCreditsApi(),
+      ]);
+      setWeeklyShakeUsage(weekly);
+      setDailyAiUsage(daily);
+      setRewardCredits(Number(rewards.credits) || 0);
+    } catch (error) {
+      setUsageError(error instanceof Error ? error.message : 'Kullanım bilgileri alınamadı.');
+    } finally {
+      setUsageLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshUsageStatus();
+  }, [hasServerAccount]);
   const entitlementLabel = profile.entitlement?.status === 'trial'
     ? 'Premium deneme'
     : profile.entitlement?.plan === 'premium'
@@ -326,6 +355,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               {profile.entitlement?.trialExpiresAt && (
                 <div className="mt-1 text-stone-500">Deneme bitişi: {new Date(profile.entitlement.trialExpiresAt).toLocaleDateString('tr-TR')}</div>
               )}
+            </div>
+            <div className="rounded-2xl border border-stone-200 bg-white p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-bold text-stone-900">Kullanım durumu</div>
+                <button onClick={refreshUsageStatus} disabled={usageLoading} className="text-[11px] font-bold text-emerald-700 disabled:opacity-50">{usageLoading ? 'Yükleniyor...' : 'Yenile'}</button>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-[11px]">
+                <div className="rounded-xl bg-stone-50 p-2">
+                  <div className="text-stone-500">Haftalık shake</div>
+                  <div className="mt-0.5 font-bold text-stone-900">{weeklyShakeUsage?.unlimited ? 'Sınırsız' : `${weeklyShakeUsage?.used ?? '—'} / ${weeklyShakeUsage?.limit ?? '—'}`}</div>
+                </div>
+                <div className="rounded-xl bg-stone-50 p-2">
+                  <div className="text-stone-500">Günlük AI</div>
+                  <div className="mt-0.5 font-bold text-stone-900">{dailyAiUsage?.unlimited ? 'Sınırsız' : `${dailyAiUsage?.used ?? '—'} / ${dailyAiUsage?.limit ?? '—'}`}</div>
+                </div>
+              </div>
+              <div className="text-[11px] text-stone-500">Reward kredisi: <span className="font-bold text-stone-700">{rewardCredits ?? '—'}</span></div>
+              {usageError && <div className="text-[11px] text-red-700 bg-red-50 rounded-xl p-2">{usageError}</div>}
             </div>
             <button onClick={handleAccountLogout} disabled={accountLoading} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-stone-200 text-xs font-bold text-stone-700 disabled:opacity-50">
               <LogOut className="w-4 h-4" /> Çıkış Yap

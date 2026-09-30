@@ -6,6 +6,7 @@ import {
   deduplicateRequest,
   getRequestClientKey,
 } from '../src/server/aiProvider.js';
+import { requireAiUsage } from '../src/server/usageGuard.js';
 
 const MAX_IMAGES = 4;
 const MAX_BASE64_CHARS_PER_IMAGE = 8 * 1024 * 1024;
@@ -21,6 +22,9 @@ export default async function handler(req: Request, res: Response) {
   if (!checkRateLimit(rateKey, 10)) {
     return res.status(429).json({ error: 'Çok fazla öğün analizi isteği gönderildi. Lütfen biraz sonra tekrar deneyin.' });
   }
+
+  const usage = await requireAiUsage(req, res, 'rewarded_ai_generation_daily');
+  if (!usage) return;
 
   let body = req.body;
   if (typeof body === 'string') {
@@ -59,7 +63,7 @@ export default async function handler(req: Request, res: Response) {
       userNotes: body.userNotes || '',
     }))
     .digest('hex');
-  const requestKey = `meal:${requestFingerprint}`;
+  const requestKey = `meal:${usage.account.id}:${requestFingerprint}`;
 
   try {
     const result = await deduplicateRequest(requestKey, () => analyzeMealMultiVision({

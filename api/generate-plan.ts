@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { generateDailyShakePlan, generateDeterministicDailyPlan } from '../src/server/geminiService.js';
 import { checkRateLimit, deduplicateRequest, getRequestClientKey } from '../src/server/aiProvider.js';
+import { requireAiUsage } from '../src/server/usageGuard.js';
 
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') {
@@ -11,6 +12,9 @@ export default async function handler(req: Request, res: Response) {
   if (!checkRateLimit(rateKey, 20)) {
     return res.status(429).json({ error: 'Çok fazla plan oluşturma isteği gönderildi. Lütfen biraz sonra tekrar deneyin.' });
   }
+
+  const usage = await requireAiUsage(req, res, 'free_shake_weekly');
+  if (!usage) return;
 
   let body = req.body;
   if (typeof body === 'string') {
@@ -60,7 +64,7 @@ export default async function handler(req: Request, res: Response) {
   };
 
   try {
-    const cacheKey = `generate-plan:${JSON.stringify(planParams)}`;
+    const cacheKey = `generate-plan:${usage.account.id}:${JSON.stringify(planParams)}`;
     const plan = await deduplicateRequest(cacheKey, () => generateDailyShakePlan(planParams));
     return res.status(200).json(plan);
   } catch (error: unknown) {

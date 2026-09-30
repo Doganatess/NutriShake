@@ -1,4 +1,4 @@
-import { Shake, ShoppingItem, StockItem } from '../types';
+import { MealAnalysis, Shake, ShoppingItem, StockItem } from '../types';
 import { INGREDIENT_MAP, canonicalIngredientId } from '../data/ingredients';
 import { getStoredStock, getStoredStockTransactions } from '../storage/storageAbstraction';
 
@@ -81,11 +81,14 @@ function getActualPricePerNormalizedUnit(ingredientId: string): number {
 export function generateShoppingList(
   arg1: any,
   arg2?: any,
-  arg3?: any
+  arg3?: any,
+  arg4?: MealAnalysis[]
 ): ShoppingItem[] & { items: ShoppingItem[]; totalEstimatedCost: number } {
   let shakes: Shake[] = [];
   let multiplier = 1;
   const existingCheckedIds: Set<string> = arg3 instanceof Set ? arg3 : new Set();
+
+  const plannedMeals: MealAnalysis[] = Array.isArray(arg4) ? arg4 : [];
 
   if (Array.isArray(arg1)) {
     shakes = arg1;
@@ -100,9 +103,6 @@ export function generateShoppingList(
       if (p && p.id !== currentPlan?.id && Array.isArray(p.shakes)) shakes.push(...p.shakes);
     });
 
-    // Saved future plans are already day-specific; only use a multiplier when
-    // the caller supplied a single-shake array. Do not multiply a multi-day plan
-    // a second time.
     multiplier = 1;
     if (shakes.length === 1 && daysScope > 1) multiplier = daysScope;
   }
@@ -112,6 +112,19 @@ export function generateShoppingList(
     shake.ingredients?.forEach((item) => {
       const canonicalId = canonicalIngredientId(item.ingredientId);
       const amount = Math.max(0, Number(item.normalizedGrams || item.amount || 0)) * multiplier;
+      if (!amount) return;
+      aggregatedMap[canonicalId] = aggregatedMap[canonicalId] || { totalRequired: 0 };
+      aggregatedMap[canonicalId].totalRequired += amount;
+    });
+  });
+
+  // Future planned meals participate in the same shopping calculation.
+  // Historical meals are ignored by the caller, so the list remains actionable.
+  plannedMeals.forEach((meal) => {
+    meal.items?.forEach((item) => {
+      if (!item.ingredientId || !item.amount) return;
+      const canonicalId = canonicalIngredientId(item.ingredientId);
+      const amount = Math.max(0, Number(item.amount) || 0);
       if (!amount) return;
       aggregatedMap[canonicalId] = aggregatedMap[canonicalId] || { totalRequired: 0 };
       aggregatedMap[canonicalId].totalRequired += amount;

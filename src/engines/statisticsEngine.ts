@@ -382,3 +382,49 @@ export function computeWeightStats(weights: WeightEntry[], targetWeight?: number
       : false),
   };
 }
+
+export interface PersonalizationInsights {
+  preferredPortion?: 'small' | 'medium' | 'large';
+  preferredTiming?: string;
+  completionRate: number;
+  topIngredients: IngredientAffinity[];
+  dislikedRecipeCount: number;
+}
+
+/**
+ * Converts existing behavioral signals into a compact personalization profile.
+ * No AI decision is made here: this is deterministic and remains subordinate to
+ * stock, allergy and validator rules.
+ */
+export function getPersonalizationInsights(
+  plans: Record<string, DailyPlan>,
+  favorites: Shake[],
+  dislikedCount = 0,
+): PersonalizationInsights {
+  const shakes = Object.values(plans).flatMap((plan) => plan.shakes || []);
+  const portionCounts: Record<string, number> = {};
+  const timingCounts: Record<string, number> = {};
+  let completed = 0;
+  let possible = 0;
+
+  shakes.forEach((shake) => {
+    if (shake.portionSize) portionCounts[shake.portionSize] = (portionCounts[shake.portionSize] || 0) + 1;
+    if (shake.timing) timingCounts[shake.timing] = (timingCounts[shake.timing] || 0) + 1;
+    const portionCount = shake.portionCount || 2;
+    possible += portionCount;
+    completed += (shake.portion1Completed ? 1 : 0) + (shake.portion2Completed ? 1 : 0);
+    if (portionCount === 1 && shake.isCompleted) completed += 1;
+  });
+
+  const preferredPortion = Object.entries(portionCounts).sort((a, b) => b[1] - a[1])[0]?.[0] as PersonalizationInsights['preferredPortion'] | undefined;
+  const preferredTiming = Object.entries(timingCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const topIngredients = getIngredientAffinityScores(favorites, plans).slice(0, 6);
+
+  return {
+    preferredPortion,
+    preferredTiming,
+    completionRate: possible > 0 ? Math.round((completed / possible) * 100) : 0,
+    topIngredients,
+    dislikedRecipeCount: dislikedCount,
+  };
+}

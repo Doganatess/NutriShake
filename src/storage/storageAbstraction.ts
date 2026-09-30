@@ -14,6 +14,7 @@ import {
   ShiftType,
   DailyActivity,
   Entitlement,
+  NotificationPreferences,
 } from '../types.js';
 
 export const CURRENT_SCHEMA_VERSION = 3;
@@ -95,6 +96,7 @@ export const STORAGE_KEYS = {
   ENTITLEMENT: 'nutrishake_entitlement',
   REWARD_CREDITS: 'nutrishake_reward_credits',
   PENDING_MUTATIONS: 'nutrishake_pending_mutations',
+  NOTIFICATION_PREFERENCES: 'nutrishake_notification_preferences',
 };
 
 // Returns current date string as YYYY-MM-DD in local time
@@ -139,6 +141,12 @@ export function saveStoredProfile(profile: UserProfile): void {
   try {
     profile.schemaVersion = CURRENT_SCHEMA_VERSION;
     setStorageItem(STORAGE_KEYS.PROFILE, JSON.stringify(profile));
+    queuePendingMutation({
+      id: `profile_${profile.id}_${profile.updatedAt || Date.now()}`,
+      type: 'profile_updated',
+      payload: { profile: { ...profile, entitlement: undefined } },
+      createdAt: new Date().toISOString(),
+    });
   } catch (e) {
     console.error('Error saving profile:', e);
   }
@@ -158,6 +166,12 @@ export function getStoredStock(): Record<string, StockItem> {
 export function saveStoredStock(stock: Record<string, StockItem>): void {
   try {
     setStorageItem(STORAGE_KEYS.USER_STOCK, JSON.stringify(stock));
+    queuePendingMutation({
+      id: `stock_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      type: 'stock_updated',
+      payload: { stock },
+      createdAt: new Date().toISOString(),
+    });
   } catch (e) {
     console.error('Error saving stock:', e);
   }
@@ -238,6 +252,12 @@ export function saveDailyPlan(plan: DailyPlan): void {
     const plans = getStoredDailyPlans();
     plans[plan.date] = plan;
     localStorage.setItem(STORAGE_KEYS.DAILY_PLANS, JSON.stringify(plans));
+    queuePendingMutation({
+      id: `plan_${plan.date}_${plan.updatedAt || Date.now()}`,
+      type: 'plan_updated',
+      payload: { plan },
+      createdAt: new Date().toISOString(),
+    });
   } catch (e) {
     console.error('Error saving daily plan:', e);
   }
@@ -260,6 +280,12 @@ export function saveMeal(meal: MealAnalysis): void {
     const meals = getStoredMeals();
     const updated = [meal, ...meals.filter((m) => m.id !== meal.id)];
     localStorage.setItem(STORAGE_KEYS.MEALS, JSON.stringify(updated));
+    queuePendingMutation({
+      id: `meal_${meal.id}_${meal.createdAt || Date.now()}`,
+      type: 'meal_created',
+      payload: { meal },
+      createdAt: new Date().toISOString(),
+    });
   } catch (e) {
     console.error('Error saving meal:', e);
   }
@@ -467,6 +493,12 @@ export function saveWeightEntry(entry: WeightEntry): void {
       (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
     );
     localStorage.setItem(STORAGE_KEYS.WEIGHTS, JSON.stringify(updated));
+    queuePendingMutation({
+      id: `weight_${entry.date}_${entry.id}`,
+      type: 'weight_logged',
+      payload: { entry },
+      createdAt: new Date().toISOString(),
+    });
   } catch (e) {
     console.error('Error saving weight entry:', e);
   }
@@ -630,7 +662,7 @@ export function saveStoredEntitlement(entitlement: Entitlement): void {
 
 export interface PendingMutation {
   id: string;
-  type: 'meal_created' | 'stock_updated' | 'weight_logged' | 'plan_updated';
+  type: 'meal_created' | 'stock_updated' | 'weight_logged' | 'plan_updated' | 'profile_updated';
   payload: unknown;
   createdAt: string;
 }
@@ -654,6 +686,33 @@ export function queuePendingMutation(mutation: PendingMutation): void {
 export function acknowledgePendingMutation(id: string): void {
   const next = getPendingMutations().filter((m) => m.id !== id);
   localStorage.setItem(STORAGE_KEYS.PENDING_MUTATIONS, JSON.stringify(next));
+}
+
+export function getStoredNotificationPreferences(): NotificationPreferences {
+  const defaults: NotificationPreferences = {
+    enabled: false,
+    breakfastReminder: true,
+    shakeReminder: true,
+    weightReminder: true,
+    lowStockReminder: true,
+    breakfastTime: '08:30',
+    shakeTime: '18:00',
+    weightDay: 1,
+    weightTime: '09:00',
+    lowStockThreshold: 1,
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.NOTIFICATION_PREFERENCES);
+    if (!raw) return defaults;
+    return { ...defaults, ...(JSON.parse(raw) as Partial<NotificationPreferences>) };
+  } catch {
+    return defaults;
+  }
+}
+
+export function saveNotificationPreferences(preferences: NotificationPreferences): void {
+  localStorage.setItem(STORAGE_KEYS.NOTIFICATION_PREFERENCES, JSON.stringify({ ...preferences, updatedAt: new Date().toISOString() }));
 }
 
 // Shift Schedule Management

@@ -190,3 +190,24 @@ export async function consumeRewardCreditApi() {
   if (!res.ok) throw new ApiError(data.error || 'Reward kredisi kullanılamadı.');
   return data;
 }
+
+export async function initializeSubscriptionCheckoutApi(input: { name: string; surname: string; gsmNumber: string }) {
+  const res = await fetch('/api/subscription-checkout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(data.error || 'Premium aboneliği başlatılamadı.');
+  return data as { token: string; checkoutFormContent: string; conversationId?: string };
+}
+
+export async function cancelSubscriptionApi() {
+  const res = await fetch('/api/subscription-cancel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(data.error || 'Abonelik iptal edilemedi.');
+  return data;
+}

@@ -17,6 +17,8 @@ import entitlementHandler from './api/entitlement';
 import usageHandler from './api/usage';
 import rewardsHandler from './api/rewards';
 import subscriptionWebhookHandler from './api/subscription-webhook';
+import syncHandler from './api/sync';
+import notificationsHandler from './api/notifications';
 
 dotenv.config();
 
@@ -33,6 +35,8 @@ app.all('/api/entitlement', entitlementHandler);
 app.all('/api/usage', usageHandler);
 app.all('/api/rewards', rewardsHandler);
 app.all('/api/subscription-webhook', subscriptionWebhookHandler);
+app.all('/api/sync', syncHandler);
+app.all('/api/notifications', notificationsHandler);
 
 // Health check endpoint with provider status
 app.get('/api/health', (_req, res) => {

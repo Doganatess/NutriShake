@@ -15,6 +15,7 @@ import {
   DailyPlan,
   MealAnalysis,
   IngredientState,
+  PortionPreference,
 } from './types';
 import {
   getStoredProfile,
@@ -23,13 +24,14 @@ import {
   getStoredMeals,
   getTodayDateString,
   saveDailyPlan,
+  saveStoredProfile,
   getStoredPreferences,
   getStoredDislikedShakes,
   getStoredFavorites,
   getStoredWeights,
 } from './store/storage';
 import { calculateDailyNutrition } from './utils/nutritionEngine';
-import { generateDailyPlanApi } from './services/apiClient';
+import { generateDailyPlanApi, getAccountApi } from './services/apiClient';
 import { generateDailyPlan } from './engines/planningEngine';
 import { getStoredStock, getStoredDailyPlans, getDailyActivity } from './storage/storageAbstraction';
 import { getIngredientAffinityScores } from './engines/statisticsEngine';
@@ -66,6 +68,27 @@ export default function App() {
   // stale one instead of letting two responses race to write dailyPlan state.
   const generatePlanAbortRef = useRef<AbortController | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
+  const [showPortionPicker, setShowPortionPicker] = useState(false);
+  const [selectedPortionPreference, setSelectedPortionPreference] = useState<PortionPreference>(profile?.portionPreference || 'medium');
+
+  // Restore the server-side account/entitlement into the local profile when a session exists.
+  // localStorage remains a UI cache only; server entitlement stays authoritative.
+  useEffect(() => {
+    if (!profile) return;
+    getAccountApi()
+      .then(({ account }) => {
+        const updated = {
+          ...profile,
+          entitlement: account.entitlement,
+          updatedAt: new Date().toISOString(),
+        };
+        saveStoredProfile(updated);
+        setProfile(updated);
+      })
+      .catch(() => {
+        // 401 simply means there is no active server session yet.
+      });
+  }, [profile?.id]);
 
   // Online / Offline listener
   useEffect(() => {
@@ -102,8 +125,19 @@ export default function App() {
   }, []);
 
   // Generate Daily Shake Plan handler
-  const handleGeneratePlan = async () => {
+  const handleGeneratePlan = async (requestedPortion?: PortionPreference) => {
     if (!profile) return;
+    if (!requestedPortion) {
+      setSelectedPortionPreference(profile.portionPreference || 'medium');
+      setShowPortionPicker(true);
+      return;
+    }
+    setShowPortionPicker(false);
+    const planningProfile = { ...profile, portionPreference: requestedPortion };
+    if (profile.portionPreference !== requestedPortion) {
+      saveStoredProfile(planningProfile);
+      setProfile(planningProfile);
+    }
 
     // FIX (race condition): if a generate-plan request is already in flight, don't let
     // a second rapid click (e.g. mashing "Yeniden Planla") fire another one concurrently.
@@ -194,7 +228,7 @@ export default function App() {
         remainingCarbs: nutritionSummary.targetCarbs !== undefined ? Math.max(0, nutritionSummary.targetCarbs - nutritionSummary.consumedCarbs) : undefined,
         remainingFat: nutritionSummary.targetFat !== undefined ? Math.max(0, nutritionSummary.targetFat - nutritionSummary.consumedFat) : undefined,
         shakeCount: 1, // 1 daily recipe -> 2 equal portions
-        portionPreference: profile.portionPreference,
+        portionPreference: requestedPortion,
         mandatoryIngredientIds: mandatoryIds,
         allowedIngredientIds: allowedIds,
         forbiddenIngredientIds: forbiddenIds,
@@ -220,7 +254,7 @@ export default function App() {
       console.warn('AI Plan generation unavailable or offline, generating deterministic plan:', err);
       // Deterministic planning engine fallback
       try {
-        const fallbackPlan = generateDailyPlan(todayStr, profile, { meals: todayMeals });
+        const fallbackPlan = generateDailyPlan(todayStr, planningProfile, { meals: todayMeals });
         setDailyPlan(fallbackPlan);
         setActiveTab('shake');
       } catch (fallbackErr) {
@@ -265,6 +299,27 @@ export default function App() {
   }
 
   return (
+    <>
+      {showPortionPicker && (
+        <div className="fixed inset-0 z-[100] bg-black/35 backdrop-blur-[2px] flex items-center justify-center p-4">
+          <div className="w-full max-w-sm rounded-[2rem] bg-white border border-stone-200 shadow-2xl p-5">
+            <div className="text-[11px] uppercase tracking-wider font-black text-emerald-700">Shake oluştur</div>
+            <h2 className="mt-1 text-2xl font-black tracking-tight text-stone-900">Porsiyon hacmini seç</h2>
+            <p className="mt-2 text-sm leading-6 text-stone-500">Bu seçim şu an oluşturacağın shake için geçerli. Daha sonra tekrar değiştirebilirsin.</p>
+            <div className="grid grid-cols-3 gap-2 mt-5">
+              {(['small', 'medium', 'large'] as PortionPreference[]).map((size) => (
+                <button key={size} onClick={() => setSelectedPortionPreference(size)} className={`rounded-2xl border px-3 py-4 text-sm font-black transition ${selectedPortionPreference === size ? 'border-emerald-600 bg-emerald-50 text-emerald-800' : 'border-stone-200 bg-stone-50 text-stone-600'}`}>
+                  {size === 'small' ? 'Küçük' : size === 'medium' ? 'Orta' : 'Büyük'}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-4">
+              <button onClick={() => setShowPortionPicker(false)} className="py-3 rounded-2xl bg-stone-100 text-stone-700 font-bold text-sm">Vazgeç</button>
+              <button onClick={() => handleGeneratePlan(selectedPortionPreference)} className="py-3 rounded-2xl bg-stone-900 text-white font-black text-sm">Shake'leri üret</button>
+            </div>
+          </div>
+        </div>
+      )}
     <div className="min-h-screen bg-stone-50 text-stone-900 flex flex-col antialiased selection:bg-emerald-100 selection:text-emerald-900 font-sans">
       {/* Offline Alert */}
       {!isOnline && (
@@ -478,5 +533,6 @@ export default function App() {
       </nav>
 
     </div>
+    </>
   );
 }

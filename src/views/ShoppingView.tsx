@@ -16,6 +16,7 @@ import { DailyPlan, ShoppingItem } from '../types';
 import { generateShoppingList } from '../engines/shoppingListEngine';
 import { getCostSavingSuggestions } from '../engines/costOptimizerEngine';
 import { getStoredShoppingChecked, toggleShoppingChecked } from '../store/storage';
+import { getStoredMeals, getTodayDateString } from '../storage/storageAbstraction';
 import { addOrReplenishStock, deductRecipeStock } from '../engines/stockEngine';
 
 interface ShoppingViewProps {
@@ -30,9 +31,20 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({ currentPlan, savedPl
   const [showSavingsDetails, setShowSavingsDetails] = useState<boolean>(false);
 
   // Generate checklist using shoppingListEngine
+  const plannedMeals = useMemo(() => {
+    const start = new Date(`${getTodayDateString()}T00:00:00`);
+    const end = new Date(start);
+    end.setDate(start.getDate() + daysScope);
+    return getStoredMeals().filter((meal) => {
+      if ((meal.status || 'confirmed') !== 'confirmed' || !meal.items?.length) return false;
+      const date = new Date(`${meal.date}T00:00:00`);
+      return date >= start && date < end;
+    });
+  }, [daysScope]);
+
   const shoppingList = useMemo(() => {
-    return generateShoppingList(currentPlan, savedPlans, daysScope);
-  }, [currentPlan, savedPlans, daysScope]);
+    return generateShoppingList(currentPlan, savedPlans, daysScope, plannedMeals);
+  }, [currentPlan, savedPlans, daysScope, plannedMeals]);
 
   // Extract all ingredients in current scope for cost saving suggestions
   const allUsedIngredientIds = useMemo(() => {
@@ -136,7 +148,7 @@ export const ShoppingView: React.FC<ShoppingViewProps> = ({ currentPlan, savedPl
         </h2>
 
         <p className="text-xs text-stone-300 mt-1 leading-relaxed">
-          Shake tariflerinizdeki gramajlar markette satın alınabilir pratik paket boyutlarına (1 kg, 1 L, 250 g) otomatik dönüştürülür.
+          Planlanan shake'ler ve ileri tarihli öğün malzemeleri stoktan düşülerek yalnızca eksik miktar için alışveriş listesi oluşturulur.
         </p>
 
         {/* Scope selector */}

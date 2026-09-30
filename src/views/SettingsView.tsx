@@ -17,6 +17,7 @@ import {
   LogIn,
   LogOut,
   Crown,
+  CreditCard,
 } from 'lucide-react';
 import {
   UserProfile,
@@ -40,7 +41,8 @@ import {
 } from '../storage/storageAbstraction';
 import { estimateCalorieNeeds } from '../utils/nutritionEngine';
 import { getIngredientAffinityScores } from '../engines/statisticsEngine';
-import { getRewardCreditsApi, getUsageApi, loginApi, logoutApi, signupApi } from '../services/apiClient';
+import { cancelSubscriptionApi, getRewardCreditsApi, getUsageApi, initializeSubscriptionCheckoutApi, loginApi, logoutApi, signupApi } from '../services/apiClient';
+import { showRewardedVideo } from '../services/rewardedAds';
 
 interface SettingsViewProps {
   profile: UserProfile;
@@ -76,6 +78,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [weeklyShakeUsage, setWeeklyShakeUsage] = useState<{ used: number; limit: number | null; unlimited: boolean } | null>(null);
   const [dailyAiUsage, setDailyAiUsage] = useState<{ used: number; limit: number | null; unlimited: boolean } | null>(null);
   const [rewardCredits, setRewardCredits] = useState<number | null>(null);
+  const [paymentName, setPaymentName] = useState(profile.name?.split(' ')[0] || '');
+  const [paymentSurname, setPaymentSurname] = useState(profile.name?.split(' ').slice(1).join(' ') || '');
+  const [paymentPhone, setPaymentPhone] = useState('');
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  const [rewardAdLoading, setRewardAdLoading] = useState(false);
 
   const currentWeight = Number(currentWeightText) || 0;
   const targetWeight = Number(targetWeightText) || 0;
@@ -121,6 +128,67 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setAccountError(error instanceof Error ? error.message : 'Hesap işlemi başarısız oldu.');
     } finally {
       setAccountLoading(false);
+    }
+  };
+
+  const handleWatchRewardedAd = async () => {
+    setAccountError(null);
+    setAccountMessage(null);
+    setRewardAdLoading(true);
+    try {
+      await showRewardedVideo(profile.id, async () => {
+        const latest = await getRewardCreditsApi();
+        setRewardCredits(Number(latest.credits || 0));
+      });
+      setAccountMessage('Reklam tamamlandı. Reward krediniz doğrulanınca hesabınıza eklendi.');
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : 'Ödüllü reklam başlatılamadı.');
+    } finally {
+      setRewardAdLoading(false);
+    }
+  };
+
+  const handleCancelPremium = async () => {
+    if (!window.confirm('Premium aboneliğini iptal etmek istediğinize emin misiniz?')) return;
+    setAccountError(null);
+    setAccountMessage(null);
+    setPaymentLoading(true);
+    try {
+      await cancelSubscriptionApi();
+      const updated = { ...profile, entitlement: { ...profile.entitlement!, plan: 'premium' as const, status: 'active' as const, cancelAtPeriodEnd: true }, updatedAt: new Date().toISOString() };
+      saveStoredProfile(updated);
+      onUpdateProfile(updated);
+      setAccountMessage('Premium abonelik iptali planlandı. Mevcut dönem sonuna kadar Premium erişiminiz devam eder.');
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : 'Abonelik iptal edilemedi.');
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+
+  const handleStartPremium = async () => {
+    setAccountError(null);
+    setAccountMessage(null);
+    if (!paymentName.trim() || !paymentSurname.trim() || !paymentPhone.trim()) {
+      setAccountError('Premium aboneliği için ad, soyad ve telefon numarasını girin.');
+      return;
+    }
+    const paymentWindow = window.open('', '_blank');
+    if (!paymentWindow) {
+      setAccountError('Ödeme penceresi tarayıcı tarafından engellendi.');
+      return;
+    }
+    setPaymentLoading(true);
+    try {
+      const checkout = await initializeSubscriptionCheckoutApi({ name: paymentName.trim(), surname: paymentSurname.trim(), gsmNumber: paymentPhone.trim() });
+      paymentWindow.document.open();
+      paymentWindow.document.write(checkout.checkoutFormContent);
+      paymentWindow.document.close();
+    } catch (error) {
+      paymentWindow.close();
+      setAccountError(error instanceof Error ? error.message : 'Ödeme başlatılamadı.');
+    } finally {
+      setPaymentLoading(false);
     }
   };
 
@@ -372,11 +440,35 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
               </div>
               <div className="text-[11px] text-stone-500">Reward kredisi: <span className="font-bold text-stone-700">{rewardCredits ?? '—'}</span></div>
+              {profile.entitlement?.plan !== 'premium' && (
+                <button onClick={handleWatchRewardedAd} disabled={rewardAdLoading} className="w-full inline-flex items-center justify-center px-3 py-2 rounded-xl bg-emerald-700 text-white text-[11px] font-bold disabled:opacity-50">
+                  {rewardAdLoading ? 'Reklam hazırlanıyor...' : '+1 kullanım için ödüllü reklam izle'}
+                </button>
+              )}
               {usageError && <div className="text-[11px] text-red-700 bg-red-50 rounded-xl p-2">{usageError}</div>}
             </div>
             <button onClick={handleAccountLogout} disabled={accountLoading} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-stone-200 text-xs font-bold text-stone-700 disabled:opacity-50">
               <LogOut className="w-4 h-4" /> Çıkış Yap
             </button>
+            {profile.entitlement?.provider === 'iyzico' && profile.entitlement?.subscriptionId && profile.entitlement?.status === 'active' && !profile.entitlement?.cancelAtPeriodEnd ? (
+              <button onClick={handleCancelPremium} disabled={paymentLoading} className="inline-flex items-center justify-center px-4 py-2 rounded-xl border border-red-200 text-red-700 text-xs font-bold disabled:opacity-50">Aboneliği İptal Et</button>
+            ) : null}
+            {profile.entitlement?.status === 'expired' || profile.entitlement?.status === 'cancelled' || profile.entitlement?.plan === 'free' ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+                <div>
+                  <div className="text-xs font-black text-stone-900 flex items-center gap-2"><CreditCard className="w-4 h-4 text-amber-700" /> Premium Aboneliği</div>
+                  <div className="text-[11px] text-stone-600 mt-1">Ödeme iyzico güvenli ödeme formunda tamamlanır. Kart bilgileri NutriShake sunucusunda tutulmaz.</div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input value={paymentName} onChange={(e) => setPaymentName(e.target.value)} placeholder="Ad" className="w-full px-3 py-2.5 border border-stone-200 rounded-xl bg-white text-sm outline-none" />
+                  <input value={paymentSurname} onChange={(e) => setPaymentSurname(e.target.value)} placeholder="Soyad" className="w-full px-3 py-2.5 border border-stone-200 rounded-xl bg-white text-sm outline-none" />
+                </div>
+                <input value={paymentPhone} onChange={(e) => setPaymentPhone(e.target.value)} type="tel" placeholder="Telefon (+90...)" className="w-full px-3 py-2.5 border border-stone-200 rounded-xl bg-white text-sm outline-none" />
+                <button onClick={handleStartPremium} disabled={paymentLoading} className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-stone-900 text-white text-xs font-bold disabled:opacity-50">
+                  <CreditCard className="w-4 h-4" /> {paymentLoading ? 'Ödeme hazırlanıyor...' : 'Premium Aboneliğini Başlat'}
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="space-y-3">

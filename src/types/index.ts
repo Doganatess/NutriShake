@@ -590,6 +590,32 @@ export interface DailyNutritionSummary {
   goalAdjustmentKcal?: number;
 }
 
+export interface NotificationPreferences {
+  enabled: boolean;
+  breakfastReminder?: boolean;
+  shakeReminder?: boolean;
+  weightReminder?: boolean;
+  lowStockReminder?: boolean;
+  breakfastTime?: string;
+  shakeTime?: string;
+  weightDay?: number;
+  weightTime?: string;
+  lowStockThreshold?: number;
+  updatedAt: string;
+}
+
+export interface SyncSnapshot {
+  schemaVersion: number;
+  clientUpdatedAt: string;
+  profile: UserProfile | null;
+  stock: Record<string, StockItem>;
+  stockTransactions: StockTransaction[];
+  dailyPlans: Record<string, DailyPlan>;
+  meals: MealAnalysis[];
+  weights: WeightEntry[];
+  preferences: UserPreference[];
+}
+
 // Full application export/import backup schema
 export interface AppStorageSchema {
   schemaVersion: number;

@@ -116,3 +116,70 @@ export async function replaceShakeApi(payload: ReplaceShakePayload, signal?: Abo
 
   return data;
 }
+
+export interface AccountResponse {
+  account: import('../types').AccountSummary;
+}
+
+export async function signupApi(email: string, password: string): Promise<AccountResponse> {
+  return accountRequest({ action: 'signup', email, password });
+}
+
+export async function loginApi(email: string, password: string): Promise<AccountResponse> {
+  return accountRequest({ action: 'login', email, password });
+}
+
+export async function logoutApi(): Promise<void> {
+  await accountRequest({ action: 'logout' });
+}
+
+export async function getAccountApi(): Promise<AccountResponse> {
+  return accountRequest(undefined, 'GET');
+}
+
+async function accountRequest(body?: Record<string, unknown>, method: 'GET' | 'POST' = 'POST'): Promise<AccountResponse> {
+  const res = await fetch('/api/account', {
+    method,
+    headers: method === 'POST' ? { 'Content-Type': 'application/json' } : undefined,
+    body: method === 'POST' ? JSON.stringify(body || {}) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(data.error || 'Hesap işlemi başarısız oldu.');
+  return data;
+}
+
+export async function getEntitlementApi() {
+  const res = await fetch('/api/entitlement');
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(data.error || 'Entitlement alınamadı.');
+  return data;
+}
+
+export async function consumeUsageApi(feature: 'free_shake_weekly' | 'rewarded_ai_generation_daily') {
+  const res = await fetch('/api/usage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'consume', feature }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(data.error || 'Kullanım limiti doğrulanamadı.');
+  return data;
+}
+
+export async function getRewardCreditsApi() {
+  const res = await fetch('/api/rewards');
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(data.error || 'Reward kredisi alınamadı.');
+  return data;
+}
+
+export async function consumeRewardCreditApi() {
+  const res = await fetch('/api/rewards', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'consume' }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(data.error || 'Reward kredisi kullanılamadı.');
+  return data;
+}

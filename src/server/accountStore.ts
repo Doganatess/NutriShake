@@ -53,12 +53,11 @@ function normalizeEmail(email: string): string {
 
 function accountKey(id: string) { return `nutrishake:account:${id}`; }
 function emailKey(email: string) { return `nutrishake:account-email:${normalizeEmail(email)}`; }
-function subscriptionKey(subscriptionId: string) { return `nutrishake:subscription:${subscriptionId}`; }
-function customerKey(customerId: string) { return `nutrishake:customer:${customerId}`; }
 function sessionKey(tokenHash: string) { return `nutrishake:session:${tokenHash}`; }
 function usageKey(userId: string, feature: string, period: string) { return `nutrishake:usage:${userId}:${feature}:${period}`; }
 function rewardKey(userId: string) { return `nutrishake:reward:${userId}`; }
-function rewardConversionKey(userId: string, conversionId: string) { return `nutrishake:reward-conversion:${userId}:${conversionId}`; }
+function syncKey(userId: string) { return `nutrishake:sync:${userId}`; }
+function notificationKey(userId: string) { return `nutrishake:notification:${userId}`; }
 
 function hashPassword(password: string, salt = randomBytes(16).toString('hex')): string {
   const derived = scryptSync(password, salt, 64).toString('hex');
@@ -151,15 +150,7 @@ export async function updateEntitlement(userId: string, entitlement: ServerEntit
   account.entitlement = entitlement;
   account.updatedAt = new Date().toISOString();
   await redis('SET', accountKey(account.id), JSON.stringify(account));
-  if (entitlement.subscriptionId) await redis('SET', subscriptionKey(entitlement.subscriptionId), account.id);
-  if (entitlement.customerId) await redis('SET', customerKey(entitlement.customerId), account.id);
   return account;
-}
-
-
-export async function getAccountBySubscription(subscriptionId: string): Promise<ServerAccount | null> {
-  const userId = await redis('GET', subscriptionKey(subscriptionId));
-  return userId ? getAccount(String(userId)) : null;
 }
 
 export async function createSession(userId: string): Promise<string> {
@@ -210,15 +201,6 @@ export async function consumeRewardCredit(userId: string): Promise<number> {
   return credits - 1;
 }
 
-export async function hasRewardConversion(userId: string, conversionId: string): Promise<boolean> {
-  return Boolean(await redis('EXISTS', rewardConversionKey(userId, conversionId)));
-}
-
-export async function markRewardConversion(userId: string, conversionId: string): Promise<boolean> {
-  const result = await redis('SET', rewardConversionKey(userId, conversionId), '1', 'NX', 'EX', String(90 * 86400));
-  return result === 'OK';
-}
-
 export async function grantRewardCredit(userId: string): Promise<number> {
   const credits = Number(await redis('INCR', rewardKey(userId)));
   return credits;
@@ -227,4 +209,50 @@ export async function grantRewardCredit(userId: string): Promise<number> {
 export function accountPublicView(account: ServerAccount) {
   const { passwordHash: _passwordHash, ...publicAccount } = account;
   return publicAccount;
+}
+
+export interface ServerSyncSnapshot {
+  schemaVersion: number;
+  clientUpdatedAt: string;
+  profile: unknown;
+  stock: Record<string, unknown>;
+  stockTransactions: unknown[];
+  dailyPlans: Record<string, unknown>;
+  meals: unknown[];
+  weights: unknown[];
+  preferences: unknown[];
+}
+
+export async function saveSyncSnapshot(userId: string, snapshot: ServerSyncSnapshot): Promise<ServerSyncSnapshot> {
+  const existingRaw = await redis('GET', syncKey(userId));
+  if (existingRaw) {
+    try {
+      const existing = JSON.parse(String(existingRaw)) as ServerSyncSnapshot;
+      if (new Date(existing.clientUpdatedAt).getTime() > new Date(snapshot.clientUpdatedAt).getTime()) {
+        return existing;
+      }
+    } catch {
+      // Replace malformed sync state with the current valid snapshot.
+    }
+  }
+  await redis('SET', syncKey(userId), JSON.stringify(snapshot));
+  return snapshot;
+}
+
+export async function getSyncSnapshot(userId: string): Promise<ServerSyncSnapshot | null> {
+  const raw = await redis('GET', syncKey(userId));
+  if (!raw) return null;
+  try {
+    return JSON.parse(String(raw)) as ServerSyncSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveNotificationSubscription(userId: string, subscription: unknown): Promise<void> {
+  await redis('SET', notificationKey(userId), JSON.stringify(subscription));
+}
+
+export async function removeNotificationSubscription(userId: string): Promise<void> {
+  await redis('DEL', notificationKey(userId));
 }

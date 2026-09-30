@@ -312,28 +312,73 @@ export function computeNutritionStats(
   };
 }
 
-export function computeWeightStats(weights: WeightEntry[], targetWeight?: number) {
+export function computeWeightStats(weights: WeightEntry[], targetWeight?: number, goal?: 'gain_weight' | 'lose_weight' | 'maintain' | 'maintain_weight') {
   const sorted = [...weights].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   const current = sorted.length > 0 ? sorted[sorted.length - 1].weight : 0;
   const first = sorted.length > 0 ? sorted[0].weight : current;
   const totalChangeKg = Math.round((current - first) * 10) / 10;
 
   let weeklyVelocityKg = 0;
+  let smoothedWeeklyVelocityKg = 0;
+
   if (sorted.length >= 2) {
-    const days = (new Date(sorted[sorted.length - 1].date).getTime() - new Date(sorted[0].date).getTime()) / (1000 * 3600 * 24);
-    if (days >= 7) {
-      weeklyVelocityKg = Math.round(((current - first) / (days / 7)) * 10) / 10;
+    const firstTime = new Date(sorted[0].date).getTime();
+    const lastTime = new Date(sorted[sorted.length - 1].date).getTime();
+    const days = Math.max(1, (lastTime - firstTime) / (1000 * 3600 * 24));
+    weeklyVelocityKg = Math.round(((current - first) / (days / 7)) * 10) / 10;
+
+    // P3 trend: use a least-squares line across all weigh-ins instead of the
+    // first-to-last difference alone. This reduces the effect of normal daily
+    // scale noise while keeping the calculation deterministic and local.
+    if (sorted.length >= 3 && days >= 7) {
+      const points = sorted.map((entry) => ({
+        x: (new Date(entry.date).getTime() - firstTime) / (1000 * 3600 * 24),
+        y: entry.weight,
+      }));
+      const meanX = points.reduce((sum, point) => sum + point.x, 0) / points.length;
+      const meanY = points.reduce((sum, point) => sum + point.y, 0) / points.length;
+      const denominator = points.reduce((sum, point) => sum + (point.x - meanX) ** 2, 0);
+      const slopePerDay = denominator > 0
+        ? points.reduce((sum, point) => sum + (point.x - meanX) * (point.y - meanY), 0) / denominator
+        : 0;
+      smoothedWeeklyVelocityKg = Math.round(slopePerDay * 7 * 100) / 100;
     } else {
-      weeklyVelocityKg = Math.round((current - first) * 10) / 10;
+      smoothedWeeklyVelocityKg = weeklyVelocityKg;
     }
   }
 
   const remainingToTargetKg = targetWeight ? Math.round(Math.abs(targetWeight - current) * 10) / 10 : null;
+  const targetDirection = targetWeight && current !== targetWeight
+    ? targetWeight > current ? 'up' : 'down'
+    : 'at_target';
+  const velocitySupportsGoal =
+    targetDirection === 'at_target' ||
+    !goal ||
+    goal === 'maintain' ||
+    goal === 'maintain_weight'
+      ? targetDirection === 'at_target'
+      : targetDirection === 'up'
+        ? smoothedWeeklyVelocityKg > 0.05
+        : smoothedWeeklyVelocityKg < -0.05;
+
+  const estimatedWeeksToTarget =
+    remainingToTargetKg !== null &&
+    remainingToTargetKg > 0 &&
+    velocitySupportsGoal &&
+    Math.abs(smoothedWeeklyVelocityKg) >= 0.05
+      ? Math.max(1, Math.round((remainingToTargetKg / Math.abs(smoothedWeeklyVelocityKg)) * 10) / 10)
+      : null;
 
   return {
     currentWeight: current,
     totalChangeKg,
     weeklyVelocityKg,
+    smoothedWeeklyVelocityKg,
     remainingToTargetKg,
+    estimatedWeeksToTarget,
+    targetDirection,
+    hasEnoughTrendData: sorted.length >= 3 && (sorted.length > 0
+      ? (new Date(sorted[sorted.length - 1].date).getTime() - new Date(sorted[0].date).getTime()) >= 7 * 24 * 3600 * 1000
+      : false),
   };
 }

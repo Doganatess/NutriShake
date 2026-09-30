@@ -207,43 +207,91 @@ export function computeNutritionStats(
   calorieGoal: number,
   timeRange = 7
 ) {
-  const plans = Object.values(dailyPlans);
+  const safeRange = timeRange === 14 || timeRange === 30 ? timeRange : 7;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const rangeDates = Array.from({ length: safeRange }, (_, index) => {
+    const date = new Date(today);
+    date.setDate(today.getDate() - (safeRange - 1 - index));
+    return date.toISOString().slice(0, 10);
+  });
+  const rangeSet = new Set(rangeDates);
+
+  const mealsInRange = meals.filter((meal) => rangeSet.has(meal.date));
+
   let totalCalories = 0;
+  let totalProtein = 0;
+  let totalCarbs = 0;
+  let totalFat = 0;
   let daysWithinTarget = 0;
   let daysCounted = 0;
   let completedShakesCount = 0;
   let totalPlannedShakesCount = 0;
   const ingredientCounts: Record<string, number> = {};
 
-  plans.forEach((plan) => {
-    let dayCalories = 0;
-    const dayMeals = meals.filter((m) => m.date === plan.date);
-    dayMeals.forEach((m) => {
-      dayCalories += m.estimatedCalories || 0;
-    });
+  const dailyTrend = rangeDates.map((date) => {
+    const plan = dailyPlans[date];
+    const dayMeals = mealsInRange.filter((meal) => meal.date === date);
 
-    plan.shakes?.forEach((shake) => {
-      totalPlannedShakesCount++;
-      if (shake.isCompleted) {
-        completedShakesCount++;
-        dayCalories += shake.estimatedCalories || 0;
-      }
-      shake.ingredients?.forEach((item) => {
-        ingredientCounts[item.ingredientId] = (ingredientCounts[item.ingredientId] || 0) + 1;
+    let dayCalories = dayMeals.reduce((sum, meal) => sum + (meal.estimatedCalories || 0), 0);
+    let dayProtein = dayMeals.reduce((sum, meal) => sum + (meal.protein || 0), 0);
+    let dayCarbs = dayMeals.reduce((sum, meal) => sum + (meal.carbs || 0), 0);
+    let dayFat = dayMeals.reduce((sum, meal) => sum + (meal.fat || 0), 0);
+
+    if (plan) {
+      plan.shakes?.forEach((shake) => {
+        totalPlannedShakesCount++;
+
+        const completedPortions = (shake.portion1Completed ? 1 : 0) + (shake.portion2Completed ? 1 : 0);
+        const hasLegacyCompletion = completedPortions === 0 && !!shake.isCompleted;
+        const completionRatio = completedPortions > 0 ? completedPortions / 2 : hasLegacyCompletion ? 1 : 0;
+
+        if (completionRatio > 0) {
+          completedShakesCount += completedPortions > 0 ? completedPortions : 1;
+          dayCalories += Math.round((shake.estimatedCalories || 0) * completionRatio);
+          dayProtein += (shake.protein || 0) * completionRatio;
+          dayCarbs += (shake.carbs || 0) * completionRatio;
+          dayFat += (shake.fat || 0) * completionRatio;
+        }
+
+        // Ingredient frequency is based on planned recipes in the selected period,
+        // not only completed portions, so the report reflects recipe composition.
+        shake.ingredients?.forEach((item) => {
+          const canonicalId = canonicalIngredientId(item.ingredientId);
+          ingredientCounts[canonicalId] = (ingredientCounts[canonicalId] || 0) + 1;
+        });
       });
-    });
-
-    totalCalories += dayCalories;
-    daysCounted++;
-
-    if (calorieGoal > 0 && Math.abs(dayCalories - calorieGoal) <= 200) {
-      daysWithinTarget++;
     }
+
+    const logged = !!plan || dayMeals.length > 0;
+    if (logged) {
+      daysCounted++;
+      totalCalories += dayCalories;
+      totalProtein += dayProtein;
+      totalCarbs += dayCarbs;
+      totalFat += dayFat;
+      if (calorieGoal > 0 && Math.abs(dayCalories - calorieGoal) <= 200) {
+        daysWithinTarget++;
+      }
+    }
+
+    return {
+      date,
+      calories: Math.round(dayCalories),
+      protein: Math.round(dayProtein * 10) / 10,
+      carbs: Math.round(dayCarbs * 10) / 10,
+      fat: Math.round(dayFat * 10) / 10,
+      logged,
+    };
   });
 
   const count = Math.max(1, daysCounted);
   const averageCalories = Math.round(totalCalories / count);
-  const adherenceRate = Math.round((daysWithinTarget / count) * 100);
+  const averageProtein = Math.round((totalProtein / count) * 10) / 10;
+  const averageCarbs = Math.round((totalCarbs / count) * 10) / 10;
+  const averageFat = Math.round((totalFat / count) * 10) / 10;
+  const adherenceRate = daysCounted > 0 ? Math.round((daysWithinTarget / daysCounted) * 100) : 0;
 
   const topIngredients = Object.entries(ingredientCounts)
     .sort(([, a], [, b]) => b - a)
@@ -252,10 +300,15 @@ export function computeNutritionStats(
 
   return {
     averageCalories,
+    averageProtein,
+    averageCarbs,
+    averageFat,
     adherenceRate,
     completedShakesCount,
     totalPlannedShakesCount,
     topIngredients,
+    daysCounted,
+    dailyTrend,
   };
 }
 

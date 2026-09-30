@@ -53,9 +53,12 @@ function normalizeEmail(email: string): string {
 
 function accountKey(id: string) { return `nutrishake:account:${id}`; }
 function emailKey(email: string) { return `nutrishake:account-email:${normalizeEmail(email)}`; }
+function subscriptionKey(subscriptionId: string) { return `nutrishake:subscription:${subscriptionId}`; }
+function customerKey(customerId: string) { return `nutrishake:customer:${customerId}`; }
 function sessionKey(tokenHash: string) { return `nutrishake:session:${tokenHash}`; }
 function usageKey(userId: string, feature: string, period: string) { return `nutrishake:usage:${userId}:${feature}:${period}`; }
 function rewardKey(userId: string) { return `nutrishake:reward:${userId}`; }
+function rewardConversionKey(userId: string, conversionId: string) { return `nutrishake:reward-conversion:${userId}:${conversionId}`; }
 
 function hashPassword(password: string, salt = randomBytes(16).toString('hex')): string {
   const derived = scryptSync(password, salt, 64).toString('hex');
@@ -148,7 +151,15 @@ export async function updateEntitlement(userId: string, entitlement: ServerEntit
   account.entitlement = entitlement;
   account.updatedAt = new Date().toISOString();
   await redis('SET', accountKey(account.id), JSON.stringify(account));
+  if (entitlement.subscriptionId) await redis('SET', subscriptionKey(entitlement.subscriptionId), account.id);
+  if (entitlement.customerId) await redis('SET', customerKey(entitlement.customerId), account.id);
   return account;
+}
+
+
+export async function getAccountBySubscription(subscriptionId: string): Promise<ServerAccount | null> {
+  const userId = await redis('GET', subscriptionKey(subscriptionId));
+  return userId ? getAccount(String(userId)) : null;
 }
 
 export async function createSession(userId: string): Promise<string> {
@@ -197,6 +208,15 @@ export async function consumeRewardCredit(userId: string): Promise<number> {
   if (credits <= 0) return 0;
   await redis('DECR', rewardKey(userId));
   return credits - 1;
+}
+
+export async function hasRewardConversion(userId: string, conversionId: string): Promise<boolean> {
+  return Boolean(await redis('EXISTS', rewardConversionKey(userId, conversionId)));
+}
+
+export async function markRewardConversion(userId: string, conversionId: string): Promise<boolean> {
+  const result = await redis('SET', rewardConversionKey(userId, conversionId), '1', 'NX', 'EX', String(90 * 86400));
+  return result === 'OK';
 }
 
 export async function grantRewardCredit(userId: string): Promise<number> {

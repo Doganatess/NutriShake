@@ -35,6 +35,7 @@ import { generateDailyPlanApi, getAccountApi } from './services/apiClient';
 import { generateDailyPlan } from './engines/planningEngine';
 import { getStoredStock, getStoredDailyPlans, getDailyActivity } from './storage/storageAbstraction';
 import { getIngredientAffinityScores } from './engines/statisticsEngine';
+import { syncNow } from './services/syncService';
 import { hasDairyInStock } from './engines/recipeCompositionEngine';
 
 import { TodayView } from './views/TodayView';
@@ -89,6 +90,24 @@ export default function App() {
         // 401 simply means there is no active server session yet.
       });
   }, [profile?.id]);
+
+  // Account-backed offline sync. Local storage remains the immediate source of truth
+  // while offline; when a signed-in account comes online, pending mutations are flushed
+  // and the server snapshot wins only when it is newer (simple last-write-wins).
+  useEffect(() => {
+    if (!profile?.entitlement) return;
+    const runSync = () => { void syncNow().then(() => handleRefreshData()); };
+    runSync();
+    window.addEventListener('online', runSync);
+    const onVisible = () => { if (document.visibilityState === 'visible') runSync(); };
+    document.addEventListener('visibilitychange', onVisible);
+    const interval = window.setInterval(runSync, 60_000);
+    return () => {
+      window.removeEventListener('online', runSync);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.clearInterval(interval);
+    };
+  }, [profile?.id, profile?.entitlement?.status]);
 
   // Online / Offline listener
   useEffect(() => {

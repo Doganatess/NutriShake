@@ -159,6 +159,68 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({
         </div>
       </div>
 
+      {/* Daily calorie trend */}
+      <div className="bg-white rounded-3xl p-5 border border-stone-200 shadow-xs space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-stone-700">Günlük Enerji Trendi</h3>
+            <p className="text-[11px] text-stone-400 mt-0.5">Seçilen dönemde kaydedilen tüketim ve günlük hedef</p>
+          </div>
+          <div className="text-right shrink-0">
+            <div className="text-sm font-black text-stone-900">{stats.averageCalories} kcal</div>
+            <div className="text-[9px] text-stone-400">kayıtlı gün ortalaması</div>
+          </div>
+        </div>
+
+        {stats.daysCounted === 0 ? (
+          <div className="py-8 text-center text-xs text-stone-400">
+            Seçilen dönemde henüz beslenme kaydı yok.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex items-end gap-1.5 h-36">
+              {stats.dailyTrend.map((day) => {
+                const maxValue = Math.max(profile.calorieGoal, ...stats.dailyTrend.map((item) => item.calories), 1);
+                const height = day.calories > 0 ? Math.max(8, Math.round((day.calories / maxValue) * 100)) : 3;
+                const label = new Date(`${day.date}T12:00:00`).toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' });
+                return (
+                  <div key={day.date} className="flex-1 h-full flex flex-col justify-end items-center gap-1 min-w-0">
+                    <div className="w-full flex-1 flex items-end justify-center">
+                      <div
+                        title={`${label}: ${day.calories} kcal`}
+                        className={`w-full max-w-7 rounded-t-md ${day.calories === 0 ? 'bg-stone-100' : day.calories >= profile.calorieGoal - 200 && day.calories <= profile.calorieGoal + 200 ? 'bg-emerald-500' : 'bg-stone-300'}`}
+                        style={{ height: `${height}%` }}
+                      />
+                    </div>
+                    <span className="text-[8px] text-stone-400 whitespace-nowrap">{label}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-center justify-between text-[10px] text-stone-500 pt-1 border-t border-stone-100">
+              <span>Hedef: <strong className="text-stone-700">{profile.calorieGoal} kcal</strong></span>
+              <span>{stats.daysCounted} kayıtlı gün</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Macro summary */}
+      <div className="grid grid-cols-3 gap-2.5">
+        <div className="bg-white rounded-2xl p-3 border border-stone-200">
+          <div className="text-[9px] uppercase tracking-wider font-bold text-stone-400">Protein ort.</div>
+          <div className="text-lg font-black text-stone-900 mt-1">{stats.averageProtein}g</div>
+        </div>
+        <div className="bg-white rounded-2xl p-3 border border-stone-200">
+          <div className="text-[9px] uppercase tracking-wider font-bold text-stone-400">Karbonhidrat ort.</div>
+          <div className="text-lg font-black text-stone-900 mt-1">{stats.averageCarbs}g</div>
+        </div>
+        <div className="bg-white rounded-2xl p-3 border border-stone-200">
+          <div className="text-[9px] uppercase tracking-wider font-bold text-stone-400">Yağ ort.</div>
+          <div className="text-lg font-black text-stone-900 mt-1">{stats.averageFat}g</div>
+        </div>
+      </div>
+
       {/* Weight Progress & Velocity (Requirement 32) */}
       <div className="bg-white rounded-3xl p-5 border border-stone-200 shadow-xs space-y-3">
         <div className="flex items-center justify-between">

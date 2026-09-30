@@ -14,6 +14,9 @@ import {
   Clock,
   Sparkles,
   Info,
+  LogIn,
+  LogOut,
+  Crown,
 } from 'lucide-react';
 import {
   UserProfile,
@@ -37,6 +40,7 @@ import {
 } from '../storage/storageAbstraction';
 import { estimateCalorieNeeds } from '../utils/nutritionEngine';
 import { getIngredientAffinityScores } from '../engines/statisticsEngine';
+import { loginApi, logoutApi, signupApi } from '../services/apiClient';
 
 interface SettingsViewProps {
   profile: UserProfile;
@@ -61,6 +65,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [targetPaceText, setTargetPaceText] = useState(String(profile.goalSettings?.targetPace ?? profile.monthlyWeightGoalKg ?? 0.25));
   const [targetPaceUnit, setTargetPaceUnit] = useState<'kg_per_week' | 'kg_per_month'>(profile.goalSettings?.targetPaceUnit ?? 'kg_per_week');
   const [savedFeedback, setSavedFeedback] = useState<boolean>(false);
+  const [accountEmail, setAccountEmail] = useState('');
+  const [accountPassword, setAccountPassword] = useState('');
+  const [accountMode, setAccountMode] = useState<'login' | 'signup'>('login');
+  const [accountLoading, setAccountLoading] = useState(false);
+  const [accountError, setAccountError] = useState<string | null>(null);
+  const [accountMessage, setAccountMessage] = useState<string | null>(null);
 
   const currentWeight = Number(currentWeightText) || 0;
   const targetWeight = Number(targetWeightText) || 0;
@@ -80,6 +90,58 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const topAffinityIngredients = getIngredientAffinityScores(favorites, getStoredDailyPlans())
     .filter((a) => a.score >= 2)
     .slice(0, 8);
+
+  const handleAccountSubmit = async () => {
+    setAccountError(null);
+    setAccountMessage(null);
+    if (!accountEmail.trim() || accountPassword.length < 8) {
+      setAccountError('E-posta adresi ve en az 8 karakterli bir şifre girin.');
+      return;
+    }
+    setAccountLoading(true);
+    try {
+      const result = accountMode === 'login'
+        ? await loginApi(accountEmail.trim(), accountPassword)
+        : await signupApi(accountEmail.trim(), accountPassword);
+      const updated = {
+        ...profile,
+        entitlement: result.account.entitlement,
+        updatedAt: new Date().toISOString(),
+      };
+      saveStoredProfile(updated);
+      onUpdateProfile(updated);
+      setAccountPassword('');
+      setAccountMessage(accountMode === 'login' ? 'Hesabınıza giriş yapıldı.' : 'Hesabınız oluşturuldu. 7 günlük Premium denemeniz başladı.');
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : 'Hesap işlemi başarısız oldu.');
+    } finally {
+      setAccountLoading(false);
+    }
+  };
+
+  const handleAccountLogout = async () => {
+    setAccountError(null);
+    setAccountMessage(null);
+    setAccountLoading(true);
+    try {
+      await logoutApi();
+      const updated = { ...profile, entitlement: undefined, updatedAt: new Date().toISOString() };
+      saveStoredProfile(updated);
+      onUpdateProfile(updated);
+      setAccountMessage('Hesaptan çıkış yapıldı.');
+    } catch (error) {
+      setAccountError(error instanceof Error ? error.message : 'Çıkış yapılamadı.');
+    } finally {
+      setAccountLoading(false);
+    }
+  };
+
+  const hasServerAccount = Boolean(profile.id && profile.entitlement);
+  const entitlementLabel = profile.entitlement?.status === 'trial'
+    ? 'Premium deneme'
+    : profile.entitlement?.plan === 'premium'
+      ? 'Premium'
+      : 'Ücretsiz';
 
   // Handle Profile Save
   const handleSaveProfile = () => {
@@ -240,6 +302,53 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <p className="text-xs text-stone-300 mt-1 leading-relaxed">
           Kişisel hedeflerinizi güncelleyin, yapay zeka hafıza kurallarını yönetin veya verilerinizi yedekleyin.
         </p>
+      </div>
+
+      {/* Account & Subscription */}
+      <div className="bg-white rounded-3xl p-5 border border-stone-200 shadow-xs space-y-4">
+        <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+          <div className="flex items-center gap-2">
+            <Crown className="w-4 h-4 text-amber-600" />
+            <h3 className="text-sm font-bold text-stone-900">Hesap & Üyelik</h3>
+          </div>
+          {profile.entitlement && (
+            <span className="text-[11px] font-bold px-2 py-1 rounded-full bg-stone-100 text-stone-700">
+              {entitlementLabel}
+            </span>
+          )}
+        </div>
+
+        {hasServerAccount ? (
+          <div className="space-y-3">
+            <div className="rounded-2xl bg-stone-50 p-3 text-xs text-stone-700">
+              <div className="font-semibold text-stone-900">Sunucu hesabı aktif</div>
+              <div className="mt-1">Premium ve kullanım hakları sunucu tarafından doğrulanır.</div>
+              {profile.entitlement?.trialExpiresAt && (
+                <div className="mt-1 text-stone-500">Deneme bitişi: {new Date(profile.entitlement.trialExpiresAt).toLocaleDateString('tr-TR')}</div>
+              )}
+            </div>
+            <button onClick={handleAccountLogout} disabled={accountLoading} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-stone-200 text-xs font-bold text-stone-700 disabled:opacity-50">
+              <LogOut className="w-4 h-4" /> Çıkış Yap
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs text-stone-600 leading-relaxed">
+              Premium, kullanım limitleri ve ileride eklenecek ödeme sistemi için hesabınızı bağlayın. Hesap olmadan temel yerel verileriniz korunmaya devam eder.
+            </p>
+            <div className="flex gap-2">
+              <button onClick={() => setAccountMode('login')} className={`text-xs font-bold px-3 py-2 rounded-xl ${accountMode === 'login' ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-600'}`}>Giriş Yap</button>
+              <button onClick={() => setAccountMode('signup')} className={`text-xs font-bold px-3 py-2 rounded-xl ${accountMode === 'signup' ? 'bg-stone-900 text-white' : 'bg-stone-100 text-stone-600'}`}>Hesap Oluştur</button>
+            </div>
+            <input value={accountEmail} onChange={(e) => setAccountEmail(e.target.value)} type="email" placeholder="E-posta" className="w-full px-3 py-2.5 border border-stone-200 rounded-xl bg-stone-50 text-sm outline-none" />
+            <input value={accountPassword} onChange={(e) => setAccountPassword(e.target.value)} type="password" placeholder="Şifre (en az 8 karakter)" className="w-full px-3 py-2.5 border border-stone-200 rounded-xl bg-stone-50 text-sm outline-none" />
+            <button onClick={handleAccountSubmit} disabled={accountLoading} className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-700 text-white text-xs font-bold disabled:opacity-50">
+              <LogIn className="w-4 h-4" /> {accountLoading ? 'İşleniyor...' : accountMode === 'login' ? 'Giriş Yap' : 'Hesap Oluştur'}
+            </button>
+          </div>
+        )}
+        {accountError && <div className="text-xs text-red-700 bg-red-50 rounded-xl p-3">{accountError}</div>}
+        {accountMessage && <div className="text-xs text-emerald-700 bg-emerald-50 rounded-xl p-3">{accountMessage}</div>}
       </div>
 
       {/* 1. Profile & Nutritional Goals */}

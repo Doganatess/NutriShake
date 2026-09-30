@@ -103,3 +103,33 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
+// Web Push delivery hook. The server/provider can send standards-based push
+// payloads to the stored subscription; no sensitive nutrition data is embedded
+// in the notification by the service worker.
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try { payload = event.data ? event.data.json() : {}; } catch { payload = {}; }
+  const title = payload.title || 'NutriShake';
+  const body = payload.body || 'Günün planını kontrol etme zamanı.';
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: '/pwa-192x192.png',
+      badge: '/pwa-192x192.png',
+      data: { url: payload.url || '/' },
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const targetUrl = event.notification?.data?.url || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      const existing = clients.find((client) => 'focus' in client);
+      if (existing) { existing.navigate(targetUrl); return existing.focus(); }
+      return self.clients.openWindow(targetUrl);
+    })
+  );
+});

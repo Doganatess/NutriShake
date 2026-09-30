@@ -166,6 +166,13 @@ export async function consumeUsageApi(feature: 'free_shake_weekly' | 'rewarded_a
   return data;
 }
 
+export async function getUsageApi(feature: 'free_shake_weekly' | 'rewarded_ai_generation_daily') {
+  const res = await fetch(`/api/usage?feature=${encodeURIComponent(feature)}`);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new ApiError(data.error || 'Kullanım bilgisi alınamadı.');
+  return data as { feature: string; period: string; used: number; limit: number | null; unlimited: boolean };
+}
+
 export async function getRewardCreditsApi() {
   const res = await fetch('/api/rewards');
   const data = await res.json().catch(() => ({}));

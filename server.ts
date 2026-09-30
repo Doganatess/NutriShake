@@ -12,6 +12,11 @@ import {
   deduplicateRequest,
   isProviderInCooldown,
 } from './src/server/aiProvider';
+import accountHandler from './api/account';
+import entitlementHandler from './api/entitlement';
+import usageHandler from './api/usage';
+import rewardsHandler from './api/rewards';
+import subscriptionWebhookHandler from './api/subscription-webhook';
 
 dotenv.config();
 
@@ -20,6 +25,14 @@ const PORT = 3000;
 
 // Body parser for JSON with ample limit for compressed photo payloads
 app.use(express.json({ limit: '35mb' }));
+
+// Account/subscription foundation. These handlers are shared with Vercel's /api/*.ts
+// functions so local development and production use the same security rules.
+app.all('/api/account', accountHandler);
+app.all('/api/entitlement', entitlementHandler);
+app.all('/api/usage', usageHandler);
+app.all('/api/rewards', rewardsHandler);
+app.all('/api/subscription-webhook', subscriptionWebhookHandler);
 
 // Health check endpoint with provider status
 app.get('/api/health', (_req, res) => {

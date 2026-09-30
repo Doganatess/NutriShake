@@ -137,6 +137,21 @@ export interface Entitlement {
   trialStartedAt?: string;
   trialExpiresAt?: string;
   expiresAt?: string;
+  provider?: string;
+  productId?: string;
+  customerId?: string;
+  subscriptionId?: string;
+  currentPeriodStart?: string;
+  currentPeriodEnd?: string;
+  cancelAtPeriodEnd?: boolean;
+}
+
+export interface AccountSummary {
+  id: string;
+  email: string;
+  createdAt: string;
+  updatedAt: string;
+  entitlement: Entitlement;
 }
 
 export interface UserProfile {

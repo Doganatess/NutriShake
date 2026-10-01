@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
+import type { SyncSnapshot } from '../types/index.js';
 
 export interface ServerEntitlement {
   plan: 'free' | 'premium';
@@ -59,6 +60,8 @@ function sessionKey(tokenHash: string) { return `nutrishake:session:${tokenHash}
 function usageKey(userId: string, feature: string, period: string) { return `nutrishake:usage:${userId}:${feature}:${period}`; }
 function rewardKey(userId: string) { return `nutrishake:reward:${userId}`; }
 function rewardConversionKey(userId: string, conversionId: string) { return `nutrishake:reward-conversion:${userId}:${conversionId}`; }
+function syncSnapshotKey(userId: string) { return `nutrishake:sync:${userId}`; }
+function notificationSubscriptionKey(userId: string) { return `nutrishake:notifications:${userId}`; }
 
 function hashPassword(password: string, salt = randomBytes(16).toString('hex')): string {
   const derived = scryptSync(password, salt, 64).toString('hex');
@@ -162,19 +165,6 @@ export async function getAccountBySubscription(subscriptionId: string): Promise<
   return userId ? getAccount(String(userId)) : null;
 }
 
-export async function hasRewardConversion(userId: string, conversionId: string): Promise<boolean> {
-  return Boolean(await redis('GET', rewardConversionKey(userId, conversionId)));
-}
-
-export async function markRewardConversion(userId: string, conversionId: string): Promise<boolean> {
-  if (!userId || !conversionId) return false;
-  const key = rewardConversionKey(userId, conversionId);
-  const existing = await redis('GET', key);
-  if (existing) return false;
-  await redis('SET', key, new Date().toISOString());
-  return true;
-}
-
 export async function createSession(userId: string): Promise<string> {
   const token = randomBytes(32).toString('base64url');
   const tokenHash = scryptSync(token, 'nutrishake-session', 32).toString('hex');
@@ -235,6 +225,48 @@ export async function markRewardConversion(userId: string, conversionId: string)
 export async function grantRewardCredit(userId: string): Promise<number> {
   const credits = Number(await redis('INCR', rewardKey(userId)));
   return credits;
+}
+
+export async function getSyncSnapshot(userId: string): Promise<SyncSnapshot | null> {
+  const raw = await redis('GET', syncSnapshotKey(userId));
+  if (!raw) return null;
+  try {
+    return JSON.parse(String(raw)) as SyncSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveSyncSnapshot(userId: string, snapshot: SyncSnapshot): Promise<SyncSnapshot> {
+  const existing = await getSyncSnapshot(userId);
+  const incomingTime = Date.parse(snapshot.clientUpdatedAt);
+  const existingTime = existing ? Date.parse(existing.clientUpdatedAt) : -1;
+  if (existing && Number.isFinite(existingTime) && Number.isFinite(incomingTime) && incomingTime < existingTime) {
+    return existing;
+  }
+  const sanitized: SyncSnapshot = { ...snapshot, profile: snapshot.profile ? { ...snapshot.profile, entitlement: undefined } : null };
+  await redis('SET', syncSnapshotKey(userId), JSON.stringify(sanitized));
+  return sanitized;
+}
+
+export async function saveNotificationSubscription(userId: string, subscription: unknown): Promise<void> {
+  if (!subscription || typeof subscription !== 'object') throw new Error('Geçersiz bildirim aboneliği.');
+  await redis('SET', notificationSubscriptionKey(userId), JSON.stringify(subscription));
+}
+
+export async function getNotificationSubscription(userId: string): Promise<Record<string, unknown> | null> {
+  const raw = await redis('GET', notificationSubscriptionKey(userId));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(String(raw));
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function removeNotificationSubscription(userId: string): Promise<void> {
+  await redis('DEL', notificationSubscriptionKey(userId));
 }
 
 export function accountPublicView(account: ServerAccount) {

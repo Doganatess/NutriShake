@@ -458,6 +458,10 @@ function buildShakeFromIngredientCombo(
     return null;
   }
 
+  const calorieDensityKcalPer100Ml = finalNutrition.totalVolumeMl > 0
+    ? Math.round((totalCalories / finalNutrition.totalVolumeMl) * 100 * 100) / 100
+    : 0;
+
   const portionCalories = Math.round(totalCalories / 2);
   const portionProtein = Math.round((finalNutrition.protein / 2) * 10) / 10;
   const portionCarbs = Math.round((finalNutrition.carbs / 2) * 10) / 10;
@@ -495,6 +499,7 @@ function buildShakeFromIngredientCombo(
     fiber: finalNutrition.fiber,
     estimatedCost: actualCost,
     totalVolumeMl: finalNutrition.totalVolumeMl,
+    calorieDensityKcalPer100Ml,
     instructions: [
       'Tüm malzemeleri tek seferde blendere ekleyin.',
       'Yüksek devirde 50-60 saniye pürüzsüz ve kadifemsi kıvama gelene kadar çekin.',
@@ -918,6 +923,14 @@ export function composeThreeDistinctDailyShakes(options: ComposeOptions = {}): S
     const compatDiff = getCompatScore(b) - getCompatScore(a);
     if (Math.abs(compatDiff) > 10) {
       return compatDiff;
+    }
+    // Priority 0.7: prefer higher calorie density, especially for small/medium shakes.
+    // This keeps the existing stock/cost rules intact while favoring compact energy.
+    const densityA = a.calorieDensityKcalPer100Ml || (a.totalVolumeMl ? (a.estimatedCalories / a.totalVolumeMl) * 100 : 0);
+    const densityB = b.calorieDensityKcalPer100Ml || (b.totalVolumeMl ? (b.estimatedCalories / b.totalVolumeMl) * 100 : 0);
+    const densityWeight = options.userProfile?.portionPreference === 'small' ? 1.6 : options.userProfile?.portionPreference === 'large' ? 0.6 : 1;
+    if (Math.abs(densityA - densityB) > 0.08) {
+      return (densityB - densityA) * densityWeight;
     }
     // Primary (Priority 9): Minimum necessary ingredient count (4 items > 5 items > 6 items)
     if (a.ingredients.length !== b.ingredients.length) {

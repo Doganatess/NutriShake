@@ -46,10 +46,11 @@ import { StatisticsView } from './views/StatisticsView';
 import { SettingsView } from './views/SettingsView';
 import { OnboardingModal } from './components/OnboardingModal';
 import { PWAInstallBanner } from './components/PWAInstallBanner';
+import { AppErrorBoundary } from './components/AppErrorBoundary';
 
 type TabType = 'today' | 'shake' | 'nutrition' | 'stock' | 'progress' | 'settings';
 
-export default function App() {
+function AppContent() {
   const [activeTab, setActiveTab] = useState<TabType>('today');
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
 
@@ -553,5 +554,14 @@ export default function App() {
 
     </div>
     </>
+  );
+}
+
+
+export default function App() {
+  return (
+    <AppErrorBoundary>
+      <AppContent />
+    </AppErrorBoundary>
   );
 }

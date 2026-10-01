@@ -79,3 +79,18 @@ export async function subscribeToPushNotifications(): Promise<PushSubscription |
   if (!response.ok) throw new Error('Bildirim aboneliği kaydedilemedi.');
   return subscription;
 }
+
+
+export async function unsubscribeFromPushNotifications(): Promise<void> {
+  if (!('serviceWorker' in navigator)) return;
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.getSubscription();
+  if (subscription) await subscription.unsubscribe();
+  const response = await fetch('/api/notifications', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'unsubscribe' }),
+  });
+  if (!response.ok) throw new Error('Bildirim aboneliği kaldırılamadı.');
+}

@@ -17,7 +17,7 @@ import {
   NotificationPreferences,
 } from '../types.js';
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 
 /**
@@ -40,6 +40,7 @@ export function initializeStorageSchema(): void {
         STORAGE_KEYS.DAILY_PLANS,
         STORAGE_KEYS.MEALS,
         STORAGE_KEYS.CUSTOM_RECIPES,
+        STORAGE_KEYS.NOTIFICATION_PREFERENCES,
       ];
 
       for (const key of keysToVersion) {
@@ -50,8 +51,18 @@ export function initializeStorageSchema(): void {
           const parsed = JSON.parse(raw);
           if (key === STORAGE_KEYS.PROFILE) {
             if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              if (!Array.isArray(parsed.favoriteIngredientIds)) parsed.favoriteIngredientIds = [];
+              if (!Array.isArray(parsed.forbiddenIngredientIds)) parsed.forbiddenIngredientIds = [];
+              if (!parsed.goalSettings || typeof parsed.goalSettings !== 'object') parsed.goalSettings = {};
               parsed.schemaVersion = CURRENT_SCHEMA_VERSION;
             }
+          } else if (key === STORAGE_KEYS.NOTIFICATION_PREFERENCES && parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            parsed.enabled = Boolean(parsed.enabled);
+            parsed.breakfastReminder = Boolean(parsed.breakfastReminder);
+            parsed.shakeReminder = Boolean(parsed.shakeReminder);
+            parsed.weightReminder = Boolean(parsed.weightReminder);
+            parsed.lowStockReminder = Boolean(parsed.lowStockReminder);
+            parsed.schemaVersion = CURRENT_SCHEMA_VERSION;
           } else if (Array.isArray(parsed)) {
             for (const item of parsed) {
               if (item && typeof item === 'object') item.schemaVersion = CURRENT_SCHEMA_VERSION;

@@ -124,6 +124,7 @@ export const ShakeCard: React.FC<ShakeCardProps> = ({
       fiber: recalculated.fiber,
       estimatedCost: recalculated.estimatedCost,
       totalVolumeMl: recalculated.totalVolumeMl,
+      calorieDensityKcalPer100Ml: recalculated.calorieDensityKcalPer100Ml,
     };
 
     onUpdateShake(updatedShake);
@@ -327,6 +328,10 @@ export const ShakeCard: React.FC<ShakeCardProps> = ({
             <div className="text-[10px] text-stone-500 uppercase font-semibold">💧 Hacim</div>
             <div className="text-sm font-bold text-blue-700 mt-0.5">{currentNutrition.totalVolumeMl || 300}ml</div>
           </div>
+          <div className="hidden sm:block bg-stone-50 rounded-xl p-2 border border-stone-100">
+            <div className="text-[10px] text-stone-500 uppercase font-semibold">⚡ Yoğunluk</div>
+            <div className="text-sm font-bold text-amber-700 mt-0.5">{currentNutrition.calorieDensityKcalPer100Ml || 0} kcal/100ml</div>
+          </div>
         </div>
 
         {/* Cost & Volume Indicator (Requirements 14 & 28) */}
@@ -341,6 +346,7 @@ export const ShakeCard: React.FC<ShakeCardProps> = ({
           </div>
           <div className="text-stone-400">
             Kıvam: <span className="font-semibold text-stone-700">{currentNutrition.totalVolumeMl && currentNutrition.totalVolumeMl > 550 ? 'Büyük boy, akışkan' : 'İçimi dengeli kıvam'}</span>
+            {currentNutrition.calorieDensityKcalPer100Ml ? ` • ${currentNutrition.calorieDensityKcalPer100Ml} kcal/100ml` : ''}
           </div>
         </div>
 

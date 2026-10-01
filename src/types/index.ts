@@ -289,6 +289,7 @@ export interface Shake {
   fiber: number;
   estimatedCost?: number;
   totalVolumeMl?: number;
+  calorieDensityKcalPer100Ml?: number;
   instructions: string | string[];
   preparationTimeMinutes: number;
   portionSize?: PortionPreference;
@@ -332,6 +333,7 @@ export interface DailyShakeNutrition {
   fat: number;
   fiber: number;
   totalVolumeMl?: number;
+  calorieDensityKcalPer100Ml?: number;
 }
 
 export interface DailyShakePortion {

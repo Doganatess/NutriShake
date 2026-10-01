@@ -124,6 +124,7 @@ export function calculateShakeNutrition(ingredients: ShakeIngredient[]) {
     fiber: Math.round(totalFiber * 10) / 10,
     estimatedCost: Math.round(totalCost * 10) / 10,
     totalVolumeMl: Math.round(totalVolumeMl),
+    calorieDensityKcalPer100Ml: totalVolumeMl > 0 ? Math.round((totalKcal / totalVolumeMl) * 100 * 100) / 100 : 0,
     ingredients: enrichedIngredients,
   };
 }

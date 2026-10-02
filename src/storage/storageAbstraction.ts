@@ -16,8 +16,10 @@ import {
   Entitlement,
   NotificationPreferences,
 } from '../types.js';
+import { migrateStoredValue } from './migrations.js';
+import { STORAGE_SCHEMA_VERSION } from './schema.js';
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = STORAGE_SCHEMA_VERSION;
 
 
 /**
@@ -32,54 +34,42 @@ export function initializeStorageSchema(): void {
 
   try {
     const rawVersion = localStorage.getItem('nutrishake_schema_version');
-    const currentVersion = Number(rawVersion || 0);
+    const parsedVersion = Number(rawVersion || 0);
+    const currentVersion = Number.isFinite(parsedVersion) && parsedVersion >= 0
+      ? Math.floor(parsedVersion)
+      : 0;
 
-    if (!Number.isFinite(currentVersion) || currentVersion < CURRENT_SCHEMA_VERSION) {
-      const keysToVersion = [
-        STORAGE_KEYS.PROFILE,
-        STORAGE_KEYS.DAILY_PLANS,
-        STORAGE_KEYS.MEALS,
-        STORAGE_KEYS.CUSTOM_RECIPES,
-        STORAGE_KEYS.NOTIFICATION_PREFERENCES,
-      ];
+    if (currentVersion >= CURRENT_SCHEMA_VERSION) return;
 
-      for (const key of keysToVersion) {
-        const raw = localStorage.getItem(key);
-        if (!raw) continue;
+    const keysToMigrate = [
+      STORAGE_KEYS.PROFILE,
+      STORAGE_KEYS.DAILY_PLANS,
+      STORAGE_KEYS.MEALS,
+      STORAGE_KEYS.CUSTOM_RECIPES,
+      STORAGE_KEYS.NOTIFICATION_PREFERENCES,
+      STORAGE_KEYS.USER_STOCK,
+      STORAGE_KEYS.STOCK_TRANSACTIONS,
+      STORAGE_KEYS.WEIGHTS,
+      STORAGE_KEYS.PREFERENCES,
+    ];
 
-        try {
-          const parsed = JSON.parse(raw);
-          if (key === STORAGE_KEYS.PROFILE) {
-            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-              if (!Array.isArray(parsed.favoriteIngredientIds)) parsed.favoriteIngredientIds = [];
-              if (!Array.isArray(parsed.forbiddenIngredientIds)) parsed.forbiddenIngredientIds = [];
-              if (!parsed.goalSettings || typeof parsed.goalSettings !== 'object') parsed.goalSettings = {};
-              parsed.schemaVersion = CURRENT_SCHEMA_VERSION;
-            }
-          } else if (key === STORAGE_KEYS.NOTIFICATION_PREFERENCES && parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-            parsed.enabled = Boolean(parsed.enabled);
-            parsed.breakfastReminder = Boolean(parsed.breakfastReminder);
-            parsed.shakeReminder = Boolean(parsed.shakeReminder);
-            parsed.weightReminder = Boolean(parsed.weightReminder);
-            parsed.lowStockReminder = Boolean(parsed.lowStockReminder);
-            parsed.schemaVersion = CURRENT_SCHEMA_VERSION;
-          } else if (Array.isArray(parsed)) {
-            for (const item of parsed) {
-              if (item && typeof item === 'object') item.schemaVersion = CURRENT_SCHEMA_VERSION;
-            }
-          } else if (parsed && typeof parsed === 'object') {
-            for (const value of Object.values(parsed)) {
-              if (value && typeof value === 'object') {
-                (value as Record<string, unknown>).schemaVersion = CURRENT_SCHEMA_VERSION;
-              }
-            }
-          }
-          localStorage.setItem(key, JSON.stringify(parsed));
-        } catch {
-          // Preserve unreadable user data rather than overwriting it.
-        }
+    let migrationSucceeded = true;
+    for (const key of keysToMigrate) {
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        const migrated = migrateStoredValue(key, parsed, currentVersion, CURRENT_SCHEMA_VERSION);
+        localStorage.setItem(key, JSON.stringify(migrated));
+      } catch {
+        // Preserve unreadable data; never replace it with an empty value.
+        // Keep the old global version so this migration can be retried later.
+        migrationSucceeded = false;
       }
+    }
 
+    // Do not mark the migration complete if any existing value could not be processed.
+    if (migrationSucceeded) {
       localStorage.setItem(STORAGE_KEYS.SCHEMA_VERSION, String(CURRENT_SCHEMA_VERSION));
     }
   } catch (error) {

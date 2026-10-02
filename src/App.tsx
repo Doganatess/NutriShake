@@ -30,7 +30,7 @@ import {
   getStoredFavorites,
   getStoredWeights,
 } from './store/storage';
-import { calculateDailyNutrition } from './utils/nutritionEngine';
+import { getDailyNutritionSummary } from './application/use-cases/getDailyNutritionSummary';
 import { generateDailyPlanApi, getAccountApi } from './services/apiClient';
 import { generateDailyPlan } from './engines/planningEngine';
 import { getStoredStock, getStoredDailyPlans, getDailyActivity } from './storage/storageAbstraction';
@@ -131,7 +131,7 @@ function AppContent() {
 
   // Daily Nutrition Summary (Deterministic calculation)
   const nutritionSummary = useMemo(() => {
-    return calculateDailyNutrition(profile, dailyPlan, todayMeals, getDailyActivity(todayStr));
+    return getDailyNutritionSummary({ profile, plan: dailyPlan, meals: todayMeals, activity: getDailyActivity(todayStr) });
   }, [profile, dailyPlan, todayMeals]);
 
   // Refresh data callback from storage

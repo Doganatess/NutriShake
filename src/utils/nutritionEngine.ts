@@ -408,6 +408,8 @@ export function estimateCalorieNeeds(
     estimatedDailyNeed: maintenanceCalories,
     maintenanceCalories,
     recommendedGoal,
+    // Keep the public result contract aligned with calculateDailyNutrition callers.
+    goalAdjustmentKcal: dailyAdjustmentKcal,
     proteinGoal,
     dailyAdjustmentKcal,
     targetPaceKgPerWeek: Math.round(targetPaceKgPerWeek * 100) / 100,

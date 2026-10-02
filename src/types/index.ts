@@ -1,7 +1,7 @@
 // Domain Models and Types for Personal Nutrition & Shake System
 // Schema Version 2.0.0
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 /** @deprecated Legacy activity model. Kept temporarily for backward compatibility. */
 export type ActivityLevel = 'sedentary' | 'light' | 'moderate' | 'very_active';

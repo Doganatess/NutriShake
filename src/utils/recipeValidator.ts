@@ -790,7 +790,7 @@ export function validateAndSanitizeShake(
             const neededGrams = Math.round(remainingDeficit / Math.max(0.4, kcalPerGram));
             const step = Math.min(room, neededGrams);
             expItem.amount += step;
-            expItem.quantity += step;
+            expItem.quantity = (expItem.quantity ?? expItem.amount) + step;
             remainingDeficit -= Math.round(step * kcalPerGram);
           }
         }

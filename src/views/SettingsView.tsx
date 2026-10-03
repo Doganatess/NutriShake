@@ -83,16 +83,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [paymentPhone, setPaymentPhone] = useState('');
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [rewardAdLoading, setRewardAdLoading] = useState(false);
-  const [usageLoading, setUsageLoading] = useState(false);
-  const [usageError, setUsageError] = useState<string | null>(null);
-  const [weeklyShakeUsage, setWeeklyShakeUsage] = useState<{ used: number; limit: number | null; unlimited: boolean } | null>(null);
-  const [dailyAiUsage, setDailyAiUsage] = useState<{ used: number; limit: number | null; unlimited: boolean } | null>(null);
-  const [rewardCredits, setRewardCredits] = useState<number | null>(null);
-  const [paymentName, setPaymentName] = useState(profile.name?.split(' ')[0] || '');
-  const [paymentSurname, setPaymentSurname] = useState(profile.name?.split(' ').slice(1).join(' ') || '');
-  const [paymentPhone, setPaymentPhone] = useState('');
-  const [paymentLoading, setPaymentLoading] = useState(false);
-  const [rewardAdLoading, setRewardAdLoading] = useState(false);
 
   const currentWeight = Number(currentWeightText) || 0;
   const targetWeight = Number(targetWeightText) || 0;
@@ -202,6 +192,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
+  const hasServerAccount = Boolean(profile.id && profile.entitlement);
+
   const refreshUsageStatus = async () => {
     if (!hasServerAccount) return;
     setUsageLoading(true);
@@ -226,48 +218,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     if (hasServerAccount) void refreshUsageStatus();
   }, [hasServerAccount, profile.entitlement?.plan, profile.entitlement?.status]);
 
-  const handleWatchRewardedAd = async () => {
-    setAccountError(null); setAccountMessage(null); setRewardAdLoading(true);
-    try {
-      await showRewardedVideo(profile.id, async () => {
-        const latest = await getRewardCreditsApi();
-        setRewardCredits(Number(latest.credits || 0));
-      });
-      setAccountMessage('Reklam tamamlandı ve ödül doğrulama sürecine gönderildi.');
-    } catch (error) {
-      setAccountError(error instanceof Error ? error.message : 'Ödüllü reklam başlatılamadı.');
-    } finally { setRewardAdLoading(false); }
-  };
-
-  const handleStartPremium = async () => {
-    setAccountError(null); setAccountMessage(null);
-    if (!paymentName.trim() || !paymentSurname.trim() || !paymentPhone.trim()) {
-      setAccountError('Premium aboneliği için ad, soyad ve telefon numarasını girin.'); return;
-    }
-    const paymentWindow = window.open('', '_blank');
-    if (!paymentWindow) { setAccountError('Ödeme penceresi tarayıcı tarafından engellendi.'); return; }
-    setPaymentLoading(true);
-    try {
-      const checkout = await initializeSubscriptionCheckoutApi({ name: paymentName.trim(), surname: paymentSurname.trim(), gsmNumber: paymentPhone.trim() });
-      paymentWindow.document.open(); paymentWindow.document.write(checkout.checkoutFormContent); paymentWindow.document.close();
-    } catch (error) {
-      paymentWindow.close(); setAccountError(error instanceof Error ? error.message : 'Ödeme başlatılamadı.');
-    } finally { setPaymentLoading(false); }
-  };
-
-  const handleCancelPremium = async () => {
-    if (!window.confirm('Premium aboneliğini iptal etmek istediğinize emin misiniz?')) return;
-    setPaymentLoading(true); setAccountError(null); setAccountMessage(null);
-    try {
-      await cancelSubscriptionApi();
-      const updated = { ...profile, entitlement: { ...profile.entitlement!, plan: 'premium' as const, status: 'active' as const, cancelAtPeriodEnd: true }, updatedAt: new Date().toISOString() };
-      saveStoredProfile(updated); onUpdateProfile(updated);
-      setAccountMessage('Premium iptali dönem sonuna planlandı.');
-    } catch (error) {
-      setAccountError(error instanceof Error ? error.message : 'Abonelik iptal edilemedi.');
-    } finally { setPaymentLoading(false); }
-  };
-
   const handleAccountLogout = async () => {
     setAccountError(null);
     setAccountMessage(null);
@@ -285,31 +235,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  const hasServerAccount = Boolean(profile.id && profile.entitlement);
-
-  const refreshUsageStatus = async () => {
-    if (!hasServerAccount) return;
-    setUsageLoading(true);
-    setUsageError(null);
-    try {
-      const [weekly, daily, rewards] = await Promise.all([
-        getUsageApi('free_shake_weekly'),
-        getUsageApi('rewarded_ai_generation_daily'),
-        getRewardCreditsApi(),
-      ]);
-      setWeeklyShakeUsage(weekly);
-      setDailyAiUsage(daily);
-      setRewardCredits(Number(rewards.credits) || 0);
-    } catch (error) {
-      setUsageError(error instanceof Error ? error.message : 'Kullanım bilgileri alınamadı.');
-    } finally {
-      setUsageLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    refreshUsageStatus();
-  }, [hasServerAccount]);
   const entitlementLabel = profile.entitlement?.status === 'trial'
     ? 'Premium deneme'
     : profile.entitlement?.plan === 'premium'

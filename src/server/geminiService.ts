@@ -211,6 +211,9 @@ export function generateDeterministicDailyPlan(req: GeneratePlanRequest): DailyP
   });
 
   const masterShake = candidates[0];
+  if (!masterShake) {
+    throw new Error('Günlük shake planı için geçerli aday oluşturulamadı.');
+  }
   const portionKcal = masterShake.portionCalories || Math.round(masterShake.estimatedCalories / 2);
 
   const dailyShake = {

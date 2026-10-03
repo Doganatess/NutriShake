@@ -2,6 +2,7 @@ import { DailyPlan, Shake, UserProfile, MealAnalysis, DailyShake } from '../type
 import { composeThreeDistinctDailyShakes } from './recipeCompositionEngine';
 import { getStoredProfile, saveDailyPlan } from '../storage/storageAbstraction';
 import { buildDailyState } from './dailyPlanEngine';
+import { getShakeTargetKcal } from '../constants/calorieTargets';
 
 export interface PlanOptions {
   date?: string;
@@ -23,7 +24,7 @@ export function calculateOptimalDailyShakeKcal(
   const target = Number.isFinite(remainingCalories)
     ? Number(remainingCalories)
     : Math.max(0, Number(profile.calorieGoal) || 0);
-  return Math.max(0, Math.round(target));
+  return getShakeTargetKcal(target);
 }
 
 export function generateDailyPlan(

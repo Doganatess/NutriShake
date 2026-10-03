@@ -1,10 +1,20 @@
 /** Dynamic calorie validation helpers. No fixed daily calorie prescription exists. */
-export const CALORIE_TOLERANCE_KCAL = 300;
+export const SHAKE_CALORIE_BUFFER_KCAL = 250;
+export const CALORIE_TOLERANCE_KCAL = 50;
 
 export function getDailyTargetKcal(targetKcal?: number): number {
   return Number.isFinite(targetKcal) && (targetKcal as number) > 0
     ? Math.round(targetKcal as number)
     : 0;
+}
+
+/**
+ * A daily shake is planned 250 kcal below the current remaining need.
+ * The shared +/-50 kcal tolerance keeps the final target 200-300 kcal below it.
+ */
+export function getShakeTargetKcal(remainingKcalNeeded?: number): number {
+  const remaining = getDailyTargetKcal(remainingKcalNeeded);
+  return Math.max(0, remaining - SHAKE_CALORIE_BUFFER_KCAL);
 }
 
 export function isCalorieWithinTolerance(

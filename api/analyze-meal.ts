@@ -37,7 +37,8 @@ export default async function handler(req: Request, res: Response) {
     body = {};
   }
 
-  const images = Array.isArray(body.photos) && body.photos.length > 0
+  type MealImage = { base64: string; mimeType: string };
+  const images: MealImage[] = Array.isArray(body.photos) && body.photos.length > 0
     ? body.photos.map((data: unknown) => ({ base64: String(data || ''), mimeType: 'image/jpeg' }))
     : body.imageBase64
       ? [{ base64: String(body.imageBase64), mimeType: String(body.mimeType || 'image/jpeg') }]

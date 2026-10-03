@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { generateDailyShakePlan, generateDeterministicDailyPlan } from '../src/server/geminiService.js';
 import { checkRateLimit, deduplicateRequest, getRequestClientKey } from '../src/server/aiProvider.js';
 import { requireAiUsage } from '../src/server/usageGuard.js';
+import { getShakeTargetKcal } from '../src/constants/calorieTargets.js';
 
 export default async function handler(req: Request, res: Response) {
   if (req.method !== 'POST') {
@@ -45,10 +46,11 @@ export default async function handler(req: Request, res: Response) {
 
   const planParams = {
     date: date || new Date().toISOString().split('T')[0],
-    // Daily goal is the whole-day target; remainingKcalNeeded is the shake planner input.
+    // Keep the daily goal separate. Plan the shake 250 kcal below the remaining
+    // need; the shared +/-50 kcal tolerance yields a final 200-300 kcal buffer.
     dailyGoalKcal: Math.max(0, Number(dailyGoalKcal) || 0),
     consumedMealsKcal: Number(consumedMealsKcal) || 0,
-    remainingKcalNeeded: Math.max(0, Number(remainingKcalNeeded) || 0),
+    remainingKcalNeeded: getShakeTargetKcal(Number(remainingKcalNeeded) || 0),
     shakeCount: Math.min(2, Math.max(1, Number(shakeCount) || 1)),
     portionPreference: portionPreference || 'medium',
     mandatoryIngredientIds: Array.isArray(mandatoryIngredientIds) ? mandatoryIngredientIds : [],
